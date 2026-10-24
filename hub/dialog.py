@@ -139,7 +139,8 @@ class DialogManager:
             text=text,
             sender_platform=sender_platform,
             sender_device_id=sender_device_id,
-            context_intent=state.last_resolved_intent
+            context_intent=state.last_resolved_intent,
+            user_id=user_id
         )
 
         if not resolved_plan:

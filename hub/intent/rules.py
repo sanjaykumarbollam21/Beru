@@ -50,12 +50,11 @@ def match_rules(text: str) -> Optional[RuleMatch]:
     lower = cleaned.lower().strip()
 
     # 1. lock_device
-    if re.search(r"^(?:please\s+)?lock(?:\s+(?:the|my))?(?:\s+(?:screen|pc|laptop|computer|phone|device))?$", lower):
-        # If user said "lock my pc", explicit target might be in raw_text or matched here
-        if "phone" in lower:
-            explicit_target = explicit_target or "phone"
-        elif "pc" in lower or "laptop" in lower or "computer" in lower:
-            explicit_target = explicit_target or "pc"
+    lock_m = re.search(r"^(?:please\s+)?lock(?:\s+(?:the|my))?(?:\s+([a-zA-Z0-9_\-]+))?$", lower)
+    if lock_m:
+        target_token = lock_m.group(1)
+        if target_token and target_token not in ("screen", "device"):
+            explicit_target = explicit_target or target_token
         return RuleMatch("lock_device", {}, explicit_target, 0.98)
 
     # 2. set_volume
@@ -154,6 +153,34 @@ def match_rules(text: str) -> Optional[RuleMatch]:
     handover_m = re.search(r"^continue(?:\s+this)?(?:\s+session|\s+task|\s+chat)?$", cleaned, re.IGNORECASE)
     if handover_m or "continue this" in cleaned.lower():
         return RuleMatch("continue_on_device", {"context_type": "conversation"}, explicit_target or "pc", 0.96)
+
+    # 13. remember
+    rem_m = re.search(r"^remember\s+(?:that\s+)?(.+)$", cleaned, re.IGNORECASE)
+    if rem_m:
+        text_val = rem_m.group(1).strip()
+        return RuleMatch("remember", {"text": text_val}, explicit_target, 0.96)
+
+    # 14. recall
+    recall_m = re.search(r"^(?:what\s+did\s+i\s+(?:tell|say\s+to)\s+you\s+about|recall)\s+(.+)$", cleaned, re.IGNORECASE)
+    if recall_m:
+        q_val = recall_m.group(1).strip()
+        return RuleMatch("recall", {"query": q_val}, explicit_target, 0.95)
+
+    # 15. forget
+    forget_m = re.search(r"^forget\s+(.+)$", cleaned, re.IGNORECASE)
+    if forget_m:
+        q_val = forget_m.group(1).strip()
+        return RuleMatch("forget", {"query": q_val}, explicit_target, 0.96)
+
+    # 16. list_preferences
+    if re.search(r"^(?:list|show|view)\s+(?:all\s+)?(?:my\s+)?preferences$", cleaned, re.IGNORECASE):
+        return RuleMatch("list_preferences", {}, explicit_target, 0.95)
+
+    # 17. run_routine
+    routine_m = re.search(r"^(?:run|start|execute)\s+routine\s+([a-zA-Z0-9_\-\s]+)$", cleaned, re.IGNORECASE)
+    if routine_m:
+        r_name = routine_m.group(1).strip()
+        return RuleMatch("run_routine", {"name": r_name}, explicit_target, 0.95)
 
 
 

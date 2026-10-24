@@ -5,6 +5,7 @@ from hub.skills.messaging import register_messaging_skills
 from hub.skills.files import register_file_skills
 from hub.skills.clipboard import register_clipboard_skills
 from hub.skills.handover import register_handover_skills
+from hub.skills.personal import register_personal_skills
 
 def init_skills():
     register_system_skills()
@@ -13,6 +14,7 @@ def init_skills():
     register_file_skills()
     register_clipboard_skills()
     register_handover_skills()
+    register_personal_skills()
 
 # Initialize on import
 init_skills()

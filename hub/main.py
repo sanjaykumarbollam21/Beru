@@ -11,6 +11,7 @@ from hub.commands import router as commands_router
 from hub.voice.ws_voice import router as voice_router
 from hub.transfer.api import router as transfer_router
 from hub.transfer.store import transfer_store
+from hub.personalization.api import router as personalization_router
 from hub.skills import init_skills
 
 logging.basicConfig(
@@ -71,6 +72,7 @@ app.include_router(ws_router)
 app.include_router(commands_router)
 app.include_router(voice_router)
 app.include_router(transfer_router)
+app.include_router(personalization_router)
 
 
 @app.get("/")

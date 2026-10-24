@@ -12,6 +12,8 @@ from hub.confirm import confirmation_gate
 from hub.clipboard.sync import clipboard_sync_manager
 from hub.transfer.store import transfer_store
 from hub.handover.manager import handover_manager
+from hub.wake.models import WakeClaim
+from hub.wake.arbiter import wake_arbiter
 from hub.schemas import WSCommandMessage, WSResultMessage
 
 logger = logging.getLogger(__name__)
@@ -228,6 +230,26 @@ async def websocket_endpoint(
                 ho_id = data.get("handover_id")
                 if ho_id:
                     await handover_manager.accept_handover(ho_id, user_id, device_id)
+
+            elif msg_type == "wake_claim":
+                await registry.update_heartbeat(device_id)
+                import uuid
+                claim = WakeClaim(
+                    claim_id=data.get("claim_id", str(uuid.uuid4())),
+                    device_id=device_id,
+                    user_id=user_id,
+                    detector_score=float(data.get("detector_score", 0.0)),
+                    signal_level=float(data.get("signal_level", 0.0)),
+                    screen_on=bool(data.get("screen_on", False)),
+                    in_use=bool(data.get("in_use", False)),
+                    charging=bool(data.get("charging", False))
+                )
+                asyncio.create_task(wake_arbiter.submit_claim(claim))
+
+            elif msg_type == "wake_failed":
+                await registry.update_heartbeat(device_id)
+                claim_id = data.get("claim_id", "")
+                asyncio.create_task(wake_arbiter.handle_wake_failed(user_id=user_id, device_id=device_id, claim_id=claim_id))
 
             else:
                 logger.debug(f"Unknown message type '{msg_type}' from {device_id}")

@@ -34,14 +34,26 @@ class ResolvedIntent:
 def resolve_target_platform(
     explicit_target: Optional[str],
     default_target: str,
-    sender_platform: str
+    sender_platform: str,
+    user_id: Optional[str] = None,
+    skill_name: Optional[str] = None
 ) -> str:
     """
     Target resolution priority:
-    1. Explicit target wins
-    2. Skill's default_target
-    3. Sender device platform
+    1. Explicit target wins (checked against user device aliases)
+    2. User's preferred default target for this skill
+    3. Skill's default_target
+    4. Sender device platform
     """
+    if explicit_target and user_id:
+        try:
+            from hub.personalization.store import preference_store
+            alias = preference_store.get_device_alias(user_id, explicit_target)
+            if alias:
+                explicit_target = alias
+        except Exception:
+            pass
+
     if explicit_target:
         norm = explicit_target.lower().strip()
         if norm in PLATFORM_MAP:
@@ -49,6 +61,19 @@ def resolve_target_platform(
         if norm == "self":
             return sender_platform.lower()
         return norm
+
+    # User preferred default target for skill
+    if user_id and skill_name:
+        try:
+            from hub.personalization.store import preference_store
+            pref_target = preference_store.get_default_target_for_skill(user_id, skill_name)
+            if pref_target:
+                norm = pref_target.lower().strip()
+                if norm in PLATFORM_MAP:
+                    return PLATFORM_MAP[norm]
+                return norm
+        except Exception:
+            pass
 
     if default_target:
         norm = default_target.lower().strip()
@@ -66,11 +91,42 @@ class IntentResolver:
         text: str,
         sender_platform: str = "android",
         sender_device_id: Optional[str] = None,
-        context_intent: Optional[ResolvedIntent] = None
+        context_intent: Optional[ResolvedIntent] = None,
+        user_id: Optional[str] = None
     ) -> List[ResolvedIntent]:
         raw_text = text.strip()
         if not raw_text:
             return []
+
+        # Check if query matches a saved routine name
+        if user_id:
+            try:
+                from hub.personalization.store import preference_store
+                clean_routine_name = re.sub(r"^(?:run|start|execute)\s+", "", raw_text, flags=re.IGNORECASE).strip().lower()
+                routine = preference_store.get_routine(user_id, clean_routine_name)
+                if routine:
+                    plan = []
+                    for s in routine.get("steps", []):
+                        sk = skill_registry.get(s.get("skill"))
+                        if sk:
+                            t_plat = resolve_target_platform(
+                                explicit_target=s.get("target"),
+                                default_target=sk.default_target,
+                                sender_platform=sender_platform,
+                                user_id=user_id,
+                                skill_name=sk.name
+                            )
+                            plan.append(self._build_resolved_intent(
+                                skill=sk,
+                                params=dict(s.get("params", {})),
+                                target_platform=t_plat,
+                                target_device=t_plat,
+                                confidence=1.0
+                            ))
+                    if plan:
+                        return plan
+            except Exception as e:
+                logger.debug(f"Error checking routine match: {e}")
 
         # Check follow-up context e.g. "do the same on my laptop", "again on windows"
         if context_intent and re.search(r"\b(?:do\s+the\s+same|same\s+thing|again|repeat)\b", raw_text, re.IGNORECASE):
@@ -78,7 +134,9 @@ class IntentResolver:
             target_platform = resolve_target_platform(
                 explicit_target=explicit_target,
                 default_target=context_intent.skill.default_target,
-                sender_platform=sender_platform
+                sender_platform=sender_platform,
+                user_id=user_id,
+                skill_name=context_intent.skill.name
             )
             return [
                 self._build_resolved_intent(
@@ -97,14 +155,32 @@ class IntentResolver:
             if rule_match and rule_match.confidence >= settings.INTENT_CONFIDENCE_THRESHOLD:
                 skill = skill_registry.get(rule_match.skill_name)
                 if skill:
+                    params = dict(rule_match.params)
+                    # Apply app and contact preferences
+                    if user_id:
+                        try:
+                            from hub.personalization.store import preference_store
+                            if skill.name == "open_app" and "app_name" in params:
+                                pref_app = preference_store.get_preferred_app(user_id, params["app_name"])
+                                if pref_app:
+                                    params["app_name"] = pref_app
+                            elif skill.name == "send_message" and "recipient" in params:
+                                pref_contact = preference_store.get_contact_nickname(user_id, params["recipient"])
+                                if pref_contact:
+                                    params["recipient"] = pref_contact
+                        except Exception:
+                            pass
+
                     target_platform = resolve_target_platform(
                         explicit_target=rule_match.explicit_target,
                         default_target=skill.default_target,
-                        sender_platform=sender_platform
+                        sender_platform=sender_platform,
+                        user_id=user_id,
+                        skill_name=skill.name
                     )
                     intent = self._build_resolved_intent(
                         skill=skill,
-                        params=rule_match.params,
+                        params=params,
                         target_platform=target_platform,
                         target_device=target_platform,
                         confidence=rule_match.confidence
@@ -123,7 +199,9 @@ class IntentResolver:
                     target_platform = resolve_target_platform(
                         explicit_target=rule_match.explicit_target,
                         default_target=skill.default_target,
-                        sender_platform=sender_platform
+                        sender_platform=sender_platform,
+                        user_id=user_id,
+                        skill_name=skill.name
                     )
                     return [
                         self._build_resolved_intent(
@@ -150,7 +228,9 @@ class IntentResolver:
             target_platform = resolve_target_platform(
                 explicit_target=explicit_target,
                 default_target=skill.default_target,
-                sender_platform=sender_platform
+                sender_platform=sender_platform,
+                user_id=user_id,
+                skill_name=skill.name
             )
 
             intent = self._build_resolved_intent(
@@ -181,7 +261,15 @@ class IntentResolver:
         # Check missing slots
         missing_slots = skill.get_missing_fields(params) if not error else []
 
-        requires_confirm = skill.confirmation in ("soft", "hard")
+        conf_level = skill.confirmation
+        if hasattr(skill, "get_confirmation_level"):
+            conf_level = skill.get_confirmation_level(params)
+        elif skill.name == "forget":
+            q = str(params.get("query", "")).lower()
+            if "everything" in q or "all" in q:
+                conf_level = "hard"
+
+        requires_confirm = conf_level in ("soft", "hard")
 
         return ResolvedIntent(
             skill=skill,
@@ -191,7 +279,7 @@ class IntentResolver:
             confidence=confidence,
             missing_slots=missing_slots,
             requires_confirmation=requires_confirm,
-            confirmation_level=skill.confirmation,
+            confirmation_level=conf_level,
             error=error
         )
 

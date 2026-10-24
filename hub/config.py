@@ -41,6 +41,17 @@ class Settings(BaseSettings):
 
     HANDOVER_EXPIRE_SECONDS: int = 300  # 5 minutes
 
+    # Phase 5: Wake Word Arbitration & Personalization
+    ARBITRATION_WINDOW_MS: int = 250
+    ARBITRATION_COOLDOWN_SECONDS: float = 2.0
+    ARBITRATION_HYSTERESIS_SECONDS: float = 10.0
+    ARBITRATION_MIN_SCORE: float = 0.25
+    ARBITRATION_MIN_DETECTOR_SCORE: float = 0.30
+    SCORE_WEIGHT_DETECTOR: float = 0.45
+    SCORE_WEIGHT_SIGNAL: float = 0.30
+    SCORE_WEIGHT_CONTEXT: float = 0.25
+    CONTEXT_INJECTION_MAX_CHARS: int = 1000  # ~250-300 tokens
+
     # LLM Provider keys & endpoints
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
