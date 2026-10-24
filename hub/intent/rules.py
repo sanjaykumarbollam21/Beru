@@ -20,22 +20,23 @@ def extract_explicit_target(text: str) -> Tuple[Optional[str], str]:
     cleaned = text
 
     # PC / Laptop / Windows
-    pc_match = re.search(r"\b(?:on\s+(?:my\s+)?(?:laptop|pc|computer|desktop|windows))\b", cleaned, re.IGNORECASE)
+    pc_match = re.search(r"\b(?:(?:on|to)\s+(?:my\s+)?(?:laptop|pc|computer|desktop|windows))\b", cleaned, re.IGNORECASE)
     if pc_match:
         target = "pc"
         cleaned = cleaned[:pc_match.start()] + cleaned[pc_match.end():]
 
     # Phone / Mobile / Android
-    phone_match = re.search(r"\b(?:on\s+(?:my\s+)?(?:phone|mobile|android))\b", cleaned, re.IGNORECASE)
+    phone_match = re.search(r"\b(?:(?:on|to)\s+(?:my\s+)?(?:phone|mobile|android))\b", cleaned, re.IGNORECASE)
     if phone_match:
         target = "phone"
         cleaned = cleaned[:phone_match.start()] + cleaned[phone_match.end():]
 
     # Self / this device
-    self_match = re.search(r"\b(?:on\s+this\s+device|locally|here)\b", cleaned, re.IGNORECASE)
+    self_match = re.search(r"\b(?:(?:on|to)\s+this\s+device|locally|here)\b", cleaned, re.IGNORECASE)
     if self_match:
         target = "self"
         cleaned = cleaned[:self_match.start()] + cleaned[self_match.end():]
+
 
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return target, cleaned
@@ -124,6 +125,36 @@ def match_rules(text: str) -> Optional[RuleMatch]:
         recipient = msg_incomplete.group(1).strip() if msg_incomplete.group(1) else ""
         params = {"recipient": recipient} if recipient else {}
         return RuleMatch("send_message", params, explicit_target or "phone", 0.85)
+
+    # 8. send_file
+    send_file_m = re.search(r"^(?:send|transfer|share)\s+(?:the\s+)?(?:file\s+)?([a-zA-Z0-9_\-\.\s]+)$", cleaned, re.IGNORECASE)
+    if send_file_m:
+        query = send_file_m.group(1).strip()
+        # Avoid matching message
+        if not query.startswith("message") and not query.startswith("a message"):
+            return RuleMatch("send_file", {"query": query}, explicit_target, 0.94)
+
+    # 9. find_file
+    find_file_m = re.search(r"^(?:find|search\s+for|locate)\s+(?:the\s+)?(?:file\s+)?([a-zA-Z0-9_\-\.\s]+)$", cleaned, re.IGNORECASE)
+    if find_file_m:
+        query = find_file_m.group(1).strip()
+        return RuleMatch("find_file", {"query": query}, explicit_target, 0.92)
+
+    # 10. copy_to_device
+    copy_m = re.search(r"^copy\s+(?:this|that|clipboard)(?:\s+(?:content|text))?$", cleaned, re.IGNORECASE)
+    if copy_m or cleaned.lower() in ("copy this", "copy that", "copy clipboard"):
+        return RuleMatch("copy_to_device", {"text": ""}, explicit_target, 0.95)
+
+    # 11. paste_from_device
+    paste_m = re.search(r"^paste(?:\s+(?:what(?:'s|\s+is)\s+on|from))?$", cleaned, re.IGNORECASE)
+    if paste_m or cleaned.lower().startswith("paste"):
+        return RuleMatch("paste_from_device", {}, explicit_target, 0.95)
+
+    # 12. continue_on_device
+    handover_m = re.search(r"^continue(?:\s+this)?(?:\s+session|\s+task|\s+chat)?$", cleaned, re.IGNORECASE)
+    if handover_m or "continue this" in cleaned.lower():
+        return RuleMatch("continue_on_device", {"context_type": "conversation"}, explicit_target or "pc", 0.96)
+
 
 
     # RapidFuzz fallback against skill names / aliases

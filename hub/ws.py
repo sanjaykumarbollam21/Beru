@@ -9,6 +9,9 @@ from hub.registry import registry
 from hub.router import command_router
 from hub.dialog import dialog_manager
 from hub.confirm import confirmation_gate
+from hub.clipboard.sync import clipboard_sync_manager
+from hub.transfer.store import transfer_store
+from hub.handover.manager import handover_manager
 from hub.schemas import WSCommandMessage, WSResultMessage
 
 logger = logging.getLogger(__name__)
@@ -54,11 +57,30 @@ async def websocket_endpoint(
 
     logger.info(f"Device connected: {device_name} ({device_id}) platform={device_platform}")
 
+    # Check pending ready transfers for this newly connected device
+    pending_transfers = transfer_store.list_pending_for_device(user_id, device_id)
+    for p_trf in pending_transfers:
+        try:
+            await websocket.send_json({
+                "type": "file_ready",
+                "transfer_id": p_trf.transfer_id,
+                "name": p_trf.file_name,
+                "size": p_trf.file_size,
+                "sha256": p_trf.sha256,
+                "mime": p_trf.mime,
+                "from_device": p_trf.from_device_id
+            })
+        except Exception:
+            pass
+
     try:
         while True:
             data = await websocket.receive_json()
             if not isinstance(data, dict):
                 continue
+
+            handover_manager.set_active_device(user_id, device_id)
+
 
             msg_type = data.get("type")
 
@@ -183,10 +205,33 @@ async def websocket_endpoint(
                         "error": None if ok else msg
                     })
 
-                asyncio.create_task(_run_cancel())
+            elif msg_type == "clipboard_update":
+                await registry.update_heartbeat(device_id)
+                text = data.get("text", "")
+                c_hash = data.get("hash")
+                origin = data.get("origin_device", device_id)
+                ok, err, push_msg = clipboard_sync_manager.update_clipboard(user_id, origin, text, c_hash)
+                if ok and push_msg:
+                    await clipboard_sync_manager.fan_out_clipboard(user_id, origin, push_msg)
+
+            elif msg_type == "file_ack":
+                await registry.update_heartbeat(device_id)
+                t_id = data.get("transfer_id")
+                if t_id:
+                    rec = transfer_store.get_record(t_id)
+                    if rec and rec.user_id == user_id:
+                        rec.status = "delivered"
+                        transfer_store.delete_transfer_data(t_id)
+
+            elif msg_type == "handover_accept":
+                await registry.update_heartbeat(device_id)
+                ho_id = data.get("handover_id")
+                if ho_id:
+                    await handover_manager.accept_handover(ho_id, user_id, device_id)
 
             else:
                 logger.debug(f"Unknown message type '{msg_type}' from {device_id}")
+
 
     except WebSocketDisconnect:
         logger.info(f"Device disconnected: {device_id}")
