@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import logging
 from typing import Dict, Any, Optional
 from hub.registry import registry, OnlineDevice
@@ -137,4 +138,121 @@ class CommandRouter:
             if fut and not fut.done():
                 fut.set_result(result)
 
+    async def execute_intent(
+        self,
+        user_id: str,
+        sender_device_id: str,
+        target: str,
+        action: str,
+        params: Dict[str, Any],
+        command_id: Optional[str] = None,
+        timeout: float = settings.COMMAND_TIMEOUT_SECONDS
+    ) -> Dict[str, Any]:
+        cmd_id = command_id or f"cmd-{uuid.uuid4().hex[:8]}"
+
+        # 1. Resolve target
+        target_device = await registry.resolve_target(
+            user_id=user_id,
+            sender_device_id=sender_device_id,
+            target=target
+        )
+
+        if not target_device:
+            return {
+                "command_id": cmd_id,
+                "status": "offline",
+                "error": f"Target device '{target}' is offline"
+            }
+
+        if action not in target_device.capabilities:
+            return {
+                "command_id": cmd_id,
+                "status": "error",
+                "error": "unsupported"
+            }
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        async with self._lock:
+            self._pending_commands[cmd_id] = fut
+
+        execute_msg = {
+            "type": "execute",
+            "command_id": cmd_id,
+            "action": action,
+            "params": params,
+            "from_device": sender_device_id
+        }
+
+        try:
+            await target_device.websocket.send_json(execute_msg)
+        except Exception as e:
+            logger.warning(f"Failed to send execute to target {target_device.device_id}: {e}")
+            async with self._lock:
+                self._pending_commands.pop(cmd_id, None)
+            return {
+                "command_id": cmd_id,
+                "status": "offline",
+                "error": "Target disconnected during delivery"
+            }
+
+        try:
+            result: WSResultMessage = await asyncio.wait_for(fut, timeout=timeout)
+            return {
+                "command_id": cmd_id,
+                "status": result.status,
+                "data": result.data
+            }
+        except asyncio.TimeoutError:
+            return {
+                "command_id": cmd_id,
+                "status": "error",
+                "error": "timeout"
+            }
+        except Exception as e:
+            return {
+                "command_id": cmd_id,
+                "status": "error",
+                "error": str(e)
+            }
+        finally:
+            async with self._lock:
+                self._pending_commands.pop(cmd_id, None)
+
+    async def execute_plan(
+        self,
+        user_id: str,
+        sender_device_id: str,
+        plan: list,
+        start_step: int = 0
+    ) -> Dict[str, Any]:
+        results = []
+        for i in range(start_step, len(plan)):
+            intent = plan[i]
+            res = await self.execute_intent(
+                user_id=user_id,
+                sender_device_id=sender_device_id,
+                target=intent.target_device,
+                action=intent.skill.get_action_name(),
+                params=intent.params
+            )
+            results.append({
+                "step": i + 1,
+                "skill": intent.skill.name,
+                "result": res
+            })
+            if res.get("status") != "ok":
+                return {
+                    "status": "failed",
+                    "failed_step": i + 1,
+                    "skill": intent.skill.name,
+                    "error": res.get("error") or res.get("status"),
+                    "completed_steps": results
+                }
+        return {
+            "status": "ok",
+            "completed_steps": results
+        }
+
 command_router = CommandRouter()
+

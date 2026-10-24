@@ -7,6 +7,8 @@ from hub.db import init_db
 from hub.registry import registry
 from hub.pairing import router as pairing_router
 from hub.ws import router as ws_router
+from hub.commands import router as commands_router
+from hub.skills import init_skills
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Initializing Beru database...")
     init_db()
+    init_skills()
     watcher_task = asyncio.create_task(heartbeat_watcher())
     logger.info("Beru Hub started.")
     try:
@@ -49,6 +52,7 @@ app = FastAPI(
 
 app.include_router(pairing_router)
 app.include_router(ws_router)
+app.include_router(commands_router)
 
 @app.get("/")
 def root():

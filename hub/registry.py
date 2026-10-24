@@ -101,6 +101,16 @@ class DeviceRegistry:
             if target_norm == "self":
                 return self._devices.get(sender_device_id)
 
+            # Map common aliases to platform names
+            platform_alias = {
+                "pc": "windows",
+                "laptop": "windows",
+                "computer": "windows",
+                "desktop": "windows",
+                "phone": "android",
+                "mobile": "android"
+            }.get(target_norm, target_norm)
+
             # Check if target is a specific device_id
             if target in self._devices:
                 dev = self._devices[target]
@@ -111,8 +121,7 @@ class DeviceRegistry:
             user_device_ids = self._user_devices.get(user_id, set())
             for d_id in user_device_ids:
                 dev = self._devices.get(d_id)
-                if dev and dev.platform == target_norm:
-                    # Prefer another device if sender is this platform, but return matching
+                if dev and dev.platform == platform_alias:
                     return dev
 
             return None

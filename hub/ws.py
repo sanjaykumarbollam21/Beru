@@ -7,6 +7,8 @@ from hub.db import SessionLocal, utcnow, Device
 from hub.auth import get_device_by_token
 from hub.registry import registry
 from hub.router import command_router
+from hub.dialog import dialog_manager
+from hub.confirm import confirmation_gate
 from hub.schemas import WSCommandMessage, WSResultMessage
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,107 @@ async def websocket_endpoint(
                     await command_router.handle_result(result)
                 except Exception as e:
                     logger.warning(f"Malformed result from {device_id}: {e}")
+
+            elif msg_type == "text_command":
+                text = data.get("text", "")
+                await registry.update_heartbeat(device_id)
+
+                async def _run_text_command():
+                    turn_result = await dialog_manager.process_user_text(
+                        user_id=user_id,
+                        text=text,
+                        sender_platform=device_platform,
+                        sender_device_id=device_id
+                    )
+                    if turn_result.type == "clarify":
+                        await websocket.send_json({
+                            "type": "clarify",
+                            "question": turn_result.question,
+                            "missing_slots": turn_result.missing_slots
+                        })
+                    elif turn_result.type == "ready":
+                        intent = turn_result.intent
+                        if intent.requires_confirmation:
+                            conf = confirmation_gate.create_confirmation(
+                                user_id=user_id,
+                                sender_device_id=device_id,
+                                intent=intent,
+                                remaining_plan=turn_result.plan[1:]
+                            )
+                            await websocket.send_json({
+                                "type": "confirm_request",
+                                "confirmation_id": conf.id,
+                                "skill": intent.skill.name,
+                                "target": intent.target_device,
+                                "params": intent.params,
+                                "prompt": conf.prompt
+                            })
+                        else:
+                            exec_res = await command_router.execute_plan(
+                                user_id=user_id,
+                                sender_device_id=device_id,
+                                plan=turn_result.plan or [intent]
+                            )
+                            await websocket.send_json({
+                                "type": "command_status",
+                                "status": exec_res.get("status"),
+                                "data": exec_res
+                            })
+                    elif turn_result.type == "error":
+                        await websocket.send_json({
+                            "type": "command_status",
+                            "status": "error",
+                            "error": turn_result.error
+                        })
+                    elif turn_result.type == "unknown":
+                        await websocket.send_json({
+                            "type": "command_status",
+                            "status": "error",
+                            "error": turn_result.message
+                        })
+
+                asyncio.create_task(_run_text_command())
+
+            elif msg_type == "confirm":
+                conf_id = data.get("confirmation_id")
+                await registry.update_heartbeat(device_id)
+
+                async def _run_confirm():
+                    ok, record, msg = confirmation_gate.confirm(conf_id, user_id)
+                    if ok and record:
+                        plan = [record.intent] + record.remaining_plan
+                        exec_res = await command_router.execute_plan(
+                            user_id=user_id,
+                            sender_device_id=device_id,
+                            plan=plan
+                        )
+                        await websocket.send_json({
+                            "type": "command_status",
+                            "status": exec_res.get("status"),
+                            "data": exec_res
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "command_status",
+                            "status": "error",
+                            "error": msg
+                        })
+
+                asyncio.create_task(_run_confirm())
+
+            elif msg_type == "cancel":
+                conf_id = data.get("confirmation_id")
+                await registry.update_heartbeat(device_id)
+
+                async def _run_cancel():
+                    ok, record, msg = confirmation_gate.cancel(conf_id, user_id)
+                    await websocket.send_json({
+                        "type": "command_status",
+                        "status": "cancelled" if ok else "error",
+                        "error": None if ok else msg
+                    })
+
+                asyncio.create_task(_run_cancel())
 
             else:
                 logger.debug(f"Unknown message type '{msg_type}' from {device_id}")
