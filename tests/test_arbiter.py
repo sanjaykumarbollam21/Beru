@@ -45,13 +45,20 @@ def register_user(client) -> tuple[dict, dict]:
     pc = res_b.json()
     return phone, pc
 
+def get_ticket(client, token: str) -> str:
+    res = client.post("/auth/ticket", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200
+    return res.json()["ticket"]
+
 def test_two_simultaneous_claims_higher_score_wins(client):
     phone, pc = register_user(client)
 
-    with client.websocket_connect(f"/ws?token={phone['token']}") as ws_phone:
+    tkt_phone = get_ticket(client, phone['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+        tkt_pc = get_ticket(client, pc['token'])
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
 
@@ -93,10 +100,12 @@ def test_two_simultaneous_claims_higher_score_wins(client):
 def test_claim_window_and_cooldown_drops_late_claims(client):
     phone, pc = register_user(client)
 
-    with client.websocket_connect(f"/ws?token={phone['token']}") as ws_phone:
+    tkt_phone = get_ticket(client, phone['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+        tkt_pc = get_ticket(client, pc['token'])
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
 
@@ -161,10 +170,12 @@ def test_pinned_preferred_device_always_wins(client):
     # Pin PC as preferred wake device in user preferences
     preference_store.set_preference(user_id, "preferred_wake_device", pc["device_id"])
 
-    with client.websocket_connect(f"/ws?token={phone['token']}") as ws_phone:
+    tkt_phone = get_ticket(client, phone['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+        tkt_pc = get_ticket(client, pc['token'])
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
 
@@ -191,10 +202,12 @@ def test_pinned_preferred_device_always_wins(client):
 def test_wake_failed_promotes_runner_up(client):
     phone, pc = register_user(client)
 
-    with client.websocket_connect(f"/ws?token={phone['token']}") as ws_phone:
+    tkt_phone = get_ticket(client, phone['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+        tkt_pc = get_ticket(client, pc['token'])
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
 

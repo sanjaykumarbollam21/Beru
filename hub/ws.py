@@ -42,7 +42,7 @@ async def websocket_endpoint(
         )
         return
 
-    # Check authentication (ticket preferred, fallback to token for backwards compatibility)
+    # Check authentication (tickets required; raw tokens in URL prohibited)
     device = None
     with SessionLocal() as db:
         if ticket:
@@ -55,6 +55,13 @@ async def websocket_endpoint(
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device revoked")
                 return
         elif token:
+            if not settings.ALLOW_LEGACY_WS_TOKEN:
+                logger.warning("Rejected WebSocket connection: raw tokens in URL query are prohibited.")
+                await websocket.close(
+                    code=status.WS_1008_POLICY_VIOLATION,
+                    reason="Raw tokens in URL query are prohibited. Obtain a ticket via POST /auth/ticket."
+                )
+                return
             device = get_device_by_token(db, token)
             if not device or device.is_revoked:
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")

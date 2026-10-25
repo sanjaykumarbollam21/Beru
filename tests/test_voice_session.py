@@ -71,9 +71,21 @@ def test_classify_spoken_confirmation():
     assert classify_spoken_confirmation("what time is it") is None
     assert classify_spoken_confirmation("maybe tomorrow") is None
 
-def test_voice_ws_invalid_token_rejected(client):
+def get_ticket(client, device_token: str) -> str:
+    res = client.post("/auth/ticket", headers={"Authorization": f"Bearer {device_token}"})
+    assert res.status_code == 200
+    return res.json()["ticket"]
+
+def test_voice_ws_raw_token_rejected(client):
+    phone, _ = register_user_phone_and_pc(client)
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/voice?token=invalid_token") as ws:
+        with client.websocket_connect(f"/voice?token={phone['token']}") as ws:
+            pass
+    assert exc.value.code == 1008
+
+def test_voice_ws_invalid_ticket_rejected(client):
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/voice?ticket=invalid_ticket") as ws:
             pass
     assert exc.value.code == 1008
 
@@ -82,11 +94,13 @@ def test_voice_ws_complete_turn_flow(client):
     stt_orchestrator.mock_provider.set_transcript("Hey Beru, set volume to 50 on my PC")
 
     # Connect PC to regular /ws so it can execute volume if targeted
-    with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+    tkt_pc = get_ticket(client, pc['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
         _ = ws_pc.receive_json()
 
         # Phone connects to /voice
-        with client.websocket_connect(f"/voice?token={phone['token']}") as ws_voice:
+        tkt_phone = get_ticket(client, phone['token'])
+        with client.websocket_connect(f"/voice?ticket={tkt_phone}") as ws_voice:
             # 1. Start session
             ws_voice.send_json({"type": "voice_start", "mode": "wake_word", "tts": "client"})
             msg_listening = ws_voice.receive_json()
@@ -130,10 +144,12 @@ def test_voice_ws_complete_turn_flow(client):
 def test_voice_ws_spoken_confirmation_flow(client):
     phone, pc = register_user_phone_and_pc(client)
 
-    with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+    tkt_pc = get_ticket(client, pc['token'])
+    with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
         _ = ws_pc.receive_json()
 
-        with client.websocket_connect(f"/voice?token={phone['token']}") as ws_voice:
+        tkt_phone = get_ticket(client, phone['token'])
+        with client.websocket_connect(f"/voice?ticket={tkt_phone}") as ws_voice:
             # Turn 1: User says "lock my pc"
             stt_orchestrator.mock_provider.set_transcript("lock my pc")
 

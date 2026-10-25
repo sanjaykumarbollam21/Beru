@@ -149,12 +149,14 @@ def test_protocol_version_enforcement(client):
     token = reg_res.json()["token"]
 
     # 1. Connect with current protocol 2.0 -> succeeds
-    with client.websocket_connect(f"/ws?token={token}&protocol_version=2.0") as ws:
+    tkt = client.post("/auth/ticket", headers={"Authorization": f"Bearer {token}"}).json()["ticket"]
+    with client.websocket_connect(f"/ws?ticket={tkt}&protocol_version=2.0") as ws:
         msg = ws.receive_json()
         assert msg["type"] == "devices"
 
     # 2. Connect with old unsupported protocol 0.5 -> rejected with 1002
+    tkt2 = client.post("/auth/ticket", headers={"Authorization": f"Bearer {token}"}).json()["ticket"]
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect(f"/ws?token={token}&protocol_version=0.5"):
+        with client.websocket_connect(f"/ws?ticket={tkt2}&protocol_version=0.5"):
             pass
     assert exc.value.code == 1002

@@ -1,7 +1,7 @@
-import pytest
 import time
+import pytest
+from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-from fastapi.testclient import TestClient
 from hub.main import app
 from hub.db import Base, engine
 from hub.config import settings
@@ -19,19 +19,14 @@ def client():
     with TestClient(app) as c:
         yield c
 
-def register_device(client, name: str, platform: str, capabilities: list[str], user_id: str = None) -> dict:
-    if user_id is None:
-        res = client.post("/register-first-device", json={
-            "device_name": name,
-            "platform": platform,
-            "capabilities": capabilities
-        })
-        assert res.status_code == 200
-        return res.json()
-    else:
-        # First device starts pair
-        # We need a token from user to pair
-        raise NotImplementedError
+def register_device(client, name="Phone", platform="android", capabilities=None) -> dict:
+    res = client.post("/register-first-device", json={
+        "device_name": name,
+        "platform": platform,
+        "capabilities": capabilities or ["lock_device", "set_volume"]
+    })
+    assert res.status_code == 200
+    return res.json()
 
 def pair_second_device(client, first_device_token: str, name: str, platform: str, capabilities: list[str]) -> dict:
     start_res = client.post("/pair/start", headers={"Authorization": f"Bearer {first_device_token}"})
@@ -47,15 +42,30 @@ def pair_second_device(client, first_device_token: str, name: str, platform: str
     assert complete_res.status_code == 200
     return complete_res.json()
 
-def test_invalid_token_rejected(client):
+def get_ticket(client, device_token: str) -> str:
+    res = client.post("/auth/ticket", headers={"Authorization": f"Bearer {device_token}"})
+    assert res.status_code == 200
+    return res.json()["ticket"]
+
+def test_raw_token_in_url_rejected_by_default(client):
+    """Verify raw tokens in ?token= URL query are strictly rejected by default."""
+    dev = register_device(client, "Phone", "android", ["notify"])
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/ws?token=invalid_token") as ws:
+        with client.websocket_connect(f"/ws?token={dev['token']}"):
             pass
     assert exc.value.code == 1008
 
-def test_missing_token_rejected(client):
+def test_invalid_ticket_rejected(client):
+    """Verify invalid tickets are rejected."""
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/ws") as ws:
+        with client.websocket_connect("/ws?ticket=invalid_ticket"):
+            pass
+    assert exc.value.code == 1008
+
+def test_missing_ticket_rejected(client):
+    """Verify connections without ticket are rejected."""
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws"):
             pass
     assert exc.value.code == 1008
 
@@ -63,14 +73,16 @@ def test_device_list_broadcast(client):
     dev_a = register_device(client, "Phone", "android", ["notify"])
     dev_b = pair_second_device(client, dev_a["token"], "Laptop", "windows", ["lock"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         # Initial broadcast to device A
         msg1 = ws_a.receive_json()
         assert msg1["type"] == "devices"
         assert len(msg1["online"]) == 1
         assert msg1["online"][0]["id"] == dev_a["device_id"]
 
-        with client.websocket_connect(f"/ws?token={dev_b['token']}") as ws_b:
+        tkt_b = get_ticket(client, dev_b["token"])
+        with client.websocket_connect(f"/ws?ticket={tkt_b}") as ws_b:
             # Device B connects -> Device A receives update
             msg_a2 = ws_a.receive_json()
             assert msg_a2["type"] == "devices"
@@ -91,10 +103,12 @@ def test_command_routing_end_to_end(client):
     dev_a = register_device(client, "Phone", "android", ["notify"])
     dev_b = pair_second_device(client, dev_a["token"], "PC", "windows", ["lock", "volume"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         _ = ws_a.receive_json()  # initial devices broadcast
 
-        with client.websocket_connect(f"/ws?token={dev_b['token']}") as ws_b:
+        tkt_b = get_ticket(client, dev_b["token"])
+        with client.websocket_connect(f"/ws?ticket={tkt_b}") as ws_b:
             _ = ws_a.receive_json()  # dev_b joined
             _ = ws_b.receive_json()  # dev_b initial list
 
@@ -140,7 +154,8 @@ def test_command_routing_end_to_end(client):
 def test_command_offline_target(client):
     dev_a = register_device(client, "Phone", "android", ["notify"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         _ = ws_a.receive_json()  # devices broadcast
 
         # Target "windows" is offline
@@ -161,10 +176,12 @@ def test_command_unsupported_capability(client):
     dev_a = register_device(client, "Phone", "android", ["notify"])
     dev_b = pair_second_device(client, dev_a["token"], "PC", "windows", ["lock"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         _ = ws_a.receive_json()
 
-        with client.websocket_connect(f"/ws?token={dev_b['token']}") as ws_b:
+        tkt_b = get_ticket(client, dev_b["token"])
+        with client.websocket_connect(f"/ws?ticket={tkt_b}") as ws_b:
             _ = ws_a.receive_json()
             _ = ws_b.receive_json()
 
@@ -190,10 +207,12 @@ def test_command_timeout(client, monkeypatch):
     dev_a = register_device(client, "Phone", "android", ["notify"])
     dev_b = pair_second_device(client, dev_a["token"], "PC", "windows", ["lock"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         _ = ws_a.receive_json()
 
-        with client.websocket_connect(f"/ws?token={dev_b['token']}") as ws_b:
+        tkt_b = get_ticket(client, dev_b["token"])
+        with client.websocket_connect(f"/ws?ticket={tkt_b}") as ws_b:
             _ = ws_a.receive_json()
             _ = ws_b.receive_json()
 
@@ -224,7 +243,8 @@ def test_command_timeout(client, monkeypatch):
 def test_heartbeat_updates_and_timeout(client):
     dev_a = register_device(client, "Phone", "android", ["notify"])
 
-    with client.websocket_connect(f"/ws?token={dev_a['token']}") as ws_a:
+    tkt_a = get_ticket(client, dev_a["token"])
+    with client.websocket_connect(f"/ws?ticket={tkt_a}") as ws_a:
         _ = ws_a.receive_json()
 
         # Send heartbeat

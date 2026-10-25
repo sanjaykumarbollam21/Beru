@@ -221,8 +221,9 @@ def test_offline_target_reconnect_and_expiry_sweeper(client):
         content=file_content
     )
 
-    # PC was offline; now connects and receives file_ready notification
-    with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+    # PC was offline; now connects via ticket and receives file_ready notification
+    tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc['token']}"}).json()["ticket"]
+    with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
         # Initial devices list
         msg1 = ws_pc.receive_json()
         assert msg1["type"] == "devices"

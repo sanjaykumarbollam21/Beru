@@ -44,10 +44,12 @@ def register_user(client) -> tuple[dict, dict]:
 def test_clipboard_push_and_loop_prevention(client):
     phone, pc = register_user(client)
 
-    with client.websocket_connect(f"/ws?token={phone['token']}") as ws_phone:
+    tkt_phone = client.post("/auth/ticket", headers={"Authorization": f"Bearer {phone['token']}"}).json()["ticket"]
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc['token']}") as ws_pc:
+        tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc['token']}"}).json()["ticket"]
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
 
