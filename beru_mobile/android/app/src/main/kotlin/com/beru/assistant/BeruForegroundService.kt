@@ -35,11 +35,21 @@ class BeruForegroundService : Service() {
             }
             ACTION_RESTART_LISTENING -> {
                 isListening = true
-                startForeground(NOTIFICATION_ID, buildNotification(true))
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification(true))
+                } catch (e: SecurityException) {
+                    android.util.Log.w("BeruForegroundService", "Microphone permission not granted for FGS: ${e.message}")
+                    stopSelf()
+                }
             }
             else -> {
                 isListening = true
-                startForeground(NOTIFICATION_ID, buildNotification(true))
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification(true))
+                } catch (e: SecurityException) {
+                    android.util.Log.w("BeruForegroundService", "Microphone permission not granted for FGS: ${e.message}")
+                    stopSelf()
+                }
             }
         }
 

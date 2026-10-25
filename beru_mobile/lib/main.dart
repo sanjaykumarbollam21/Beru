@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
@@ -74,6 +75,17 @@ class _BeruHomePageState extends State<BeruHomePage> {
   void initState() {
     super.initState();
     _loadStoredCredentials();
+    _requestPermissions();
+  }
+
+  static const _permissionChannel = MethodChannel('com.beru.assistant/permissions');
+
+  Future<void> _requestPermissions() async {
+    try {
+      if (Platform.isAndroid) {
+        await _permissionChannel.invokeMethod('requestPermissions');
+      }
+    } catch (_) {}
   }
 
   @override
