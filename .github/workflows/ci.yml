@@ -30,12 +30,7 @@ jobs:
 
       - name: Lint Code
         run: |
-          python -m flake8 hub tests --select=E9,F63,F7,F82 --show-source --statistics 2>&1 | tee flake8_output.txt
-          cat flake8_output.txt >> $GITHUB_STEP_SUMMARY
-          if [ -s flake8_output.txt ]; then
-            echo "Flake8 found errors"
-            exit 1
-          fi
+          flake8 hub tests
 
       - name: Dependency Vulnerability Audit
         run: |
