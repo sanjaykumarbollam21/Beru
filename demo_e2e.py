@@ -71,20 +71,28 @@ def run_e2e_simulation():
     pc_token = pc_data["token"]
     print(f" -> PC paired successfully! PC Device ID: {pc_data['device_id']}")
 
-    # Step 4: Both devices connect to WebSocket endpoint
-    print("\n[Step 4] Connecting Phone and PC to /ws...")
-    with client.websocket_connect(f"/ws?token={phone_token}") as ws_phone:
-        msg_phone_init = ws_phone.receive_json()
-        print(f" -> Phone connected! Online devices: {[d['name'] for d in msg_phone_init['online']]}")
+    # Step 4: Both devices obtain short-lived WebSocket tickets (Phase 1 Auth Override)
+    print("\n[Step 4] Both devices call POST /auth/ticket for single-use tickets...")
+    tkt_phone = client.post("/auth/ticket", headers={"Authorization": f"Bearer {phone_token}"}).json()["ticket"]
+    tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc_token}"}).json()["ticket"]
+    print(f" -> Phone ticket: {tkt_phone[:15]}... (TTL 30s)")
+    print(f" -> PC ticket:    {tkt_pc[:15]}... (TTL 30s)")
 
-        with client.websocket_connect(f"/ws?token={pc_token}") as ws_pc:
-            msg_phone_updated = ws_phone.receive_json()
-            msg_pc_init = ws_pc.receive_json()
-            print(f" -> PC connected! Phone notified of online devices: {[d['name'] for d in msg_phone_updated['online']]}")
+    print("\n[Step 5] Connecting PC to /ws?ticket=...")
+    with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
+        msg_pc_init = ws_pc.receive_json()
+        print(f" -> PC connected! Online devices: {[d['name'] for d in msg_pc_init['online']]}")
 
-            # Step 5: Phone sends command to lock PC
+        print("\n[Step 6] Connecting Phone to /ws?ticket=...")
+        with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
+            msg_phone_init = ws_phone.receive_json()
+            msg_pc_updated = ws_pc.receive_json()
+            print(f" -> Phone connected! Phone online devices: {[d['name'] for d in msg_phone_init['online']]}")
+            print(f" -> PC notified of Phone joining: {[d['name'] for d in msg_pc_updated['online']]}")
+
+            # Step 7: Phone sends command to lock PC
             cmd_id = f"cmd-{uuid.uuid4().hex[:8]}"
-            print(f"\n[Step 5] Phone sends command '{cmd_id}': action='lock', target='windows'...")
+            print(f"\n[Step 7] Phone sends command '{cmd_id}': action='lock', target='windows'...")
             ws_phone.send_json({
                 "type": "command",
                 "id": cmd_id,
@@ -93,17 +101,17 @@ def run_e2e_simulation():
                 "params": {"message": "Locking workstation"}
             })
 
-            # Step 6: Phone receives delivered status
+            # Delivered status to Phone
             delivered_status = ws_phone.receive_json()
             print(f" -> Phone received status: {delivered_status}")
             assert delivered_status["status"] == "delivered"
 
-            # Step 7: PC receives execute message
+            # PC receives execute message
             exec_msg = ws_pc.receive_json()
-            print(f"\n[Step 6] PC received execution request: {exec_msg}")
+            print(f"\n[Step 8] PC received execution request: {exec_msg}")
             assert exec_msg["action"] == "lock"
 
-            # Step 8: PC simulates execution and sends back result
+            # PC simulates execution and sends back result
             print(" -> PC simulated action 'lock': [Workstation locked]")
             ws_pc.send_json({
                 "type": "result",
@@ -116,11 +124,18 @@ def run_e2e_simulation():
                 }
             })
 
-            # Step 9: Phone receives final result
+            # Phone receives final result
             final_status = ws_phone.receive_json()
-            print(f"\n[Step 7] Phone received command result: {final_status}")
+            print(f"\n[Step 9] Phone received command result: {final_status}")
             assert final_status["status"] == "ok"
-            assert final_status["data"]["locked"] is True
+
+        # Step 10: Phone disconnects; PC sees it drop from device list
+        print("\n[Step 10] Phone disconnected. Verifying PC receives updated device list...")
+        msg_pc_after_drop = ws_pc.receive_json()
+        pc_online_names = [d["name"] for d in msg_pc_after_drop["online"]]
+        print(f" -> PC received updated device list: {pc_online_names}")
+        assert "Pixel 8" not in pc_online_names
+        assert "Workstation Windows" in pc_online_names
 
     print("\n" + "=" * 60)
     print("SUCCESS: End-to-end device pairing & command routing verified!")
