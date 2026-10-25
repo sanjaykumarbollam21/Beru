@@ -84,9 +84,17 @@ class _BeruHomePageState extends State<BeruHomePage> {
   Future<void> _requestPermissions() async {
     try {
       if (Platform.isAndroid) {
-        await _permissionChannel.invokeMethod('requestPermissions');
+        final bool granted = await _permissionChannel.invokeMethod('requestPermissions');
+        if (!granted && mounted) {
+          _showSnack('Some permissions were denied. Microphone and notifications are needed for wake-word listening.');
+        }
       }
-    } catch (_) {}
+    } on PlatformException catch (e) {
+      debugPrint('Permission request failed: ${e.message}');
+      if (mounted) {
+        _showSnack('Permission request failed: ${e.message}');
+      }
+    }
   }
 
   @override
