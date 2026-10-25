@@ -37,3 +37,7 @@ jobs:
       - name: Run Test Suite
         run: |
           pytest tests/ -v
+
+      - name: Validate Docker Compose Config
+        run: |
+          docker compose -f deploy/docker-compose.yml config
