@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Beru Assistant - Windows PC</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --green: #10b981;
+      --orange: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      line-height: 1.5;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    h1 { font-size: 20px; font-weight: 600; color: #fff; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      background: #1f2937;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+    .status-pill.connected .status-dot { background: var(--green); }
+    .status-pill.reconnecting .status-dot { background: var(--orange); }
+    .status-pill.offline .status-dot { background: var(--red); }
+    
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; }
+    input[type="text"] {
+      flex: 1;
+      background: #030712;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: var(--primary-hover); }
+    button.btn-amber { background: #b45309; }
+    button.btn-amber:hover { background: #92400e; }
+    button.btn-secondary { background: #374151; }
+    button.btn-secondary:hover { background: #4b5563; }
+    
+    .pairing-box {
+      margin-top: 12px;
+      padding: 12px;
+      background: #030712;
+      border: 1px dashed var(--primary);
+      border-radius: 6px;
+      text-align: center;
+    }
+    .pairing-code {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 6px;
+      color: #818cf8;
+      margin: 8px 0;
+    }
+    
+    .device-list { margin-top: 8px; }
+    .device-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      background: #030712;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .device-name { font-weight: 600; font-size: 14px; }
+    .device-sub { font-size: 12px; color: var(--text-muted); }
+    .device-actions { display: flex; gap: 6px; }
+    
+    .status-badge {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: #1f2937;
+    }
+    .status-badge.ok { background: #065f46; color: #a7f3d0; }
+    .status-badge.delivered { background: #1e3a8a; color: #bfdbfe; }
+    .status-badge.timeout { background: #7f1d1d; color: #fecaca; }
+    .status-badge.unsupported { background: #78350f; color: #fde68a; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Beru Assistant &mdash; Windows Desktop (Phase 1)</h1>
+    <div id="statusPill" class="status-pill offline">
+      <span class="status-dot"></span>
+      <span id="statusText">OFFLINE</span>
+    </div>
+  </header>
+
+  <!-- 1. Hub Settings -->
+  <div class="card">
+    <div class="card-title">Hub Connection Settings</div>
+    <div class="row">
+      <input type="text" id="hubUrlInput" placeholder="http://127.0.0.1:8000 or LAN IP">
+      <button id="saveHubBtn">Save &amp; Connect</button>
+    </div>
+  </div>
+
+  <!-- 2. Registration & Pairing -->
+  <div class="card" id="authCard">
+    <div class="card-title">Device Registration &amp; Pairing</div>
+    <div id="unregisteredSection" class="row" style="margin-bottom: 12px;">
+      <button id="registerFirstBtn">Register as First Device</button>
+      <span style="color: var(--text-muted); margin: 0 8px;">or</span>
+      <input type="text" id="pairCodeInput" placeholder="Enter 6-char code" style="max-width: 180px;">
+      <button id="pairCodeBtn" class="btn-secondary">Pair</button>
+    </div>
+    <div id="registeredSection" style="display: none;">
+      <button id="genPairBtn" class="btn-secondary">Generate Pairing Code for Phone</button>
+      <div id="pairingCodeBox" class="pairing-box" style="display: none;">
+        <div>Pairing Code for Phone (valid 60s):</div>
+        <div id="displayPairCode" class="pairing-code">------</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Online Devices -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <div class="card-title" style="margin-bottom: 0;">Online Devices (<span id="devCount">0</span>)</div>
+      <div id="actionStatusBadge" class="status-badge" style="display: none;">Status: <span id="actionStatusText"></span></div>
+    </div>
+    <div id="deviceList" class="device-list">
+      <div style="color: var(--text-muted); font-size: 13px;">No devices connected.</div>
+    </div>
+  </div>
+
+  <script>
+    const statusPill = document.getElementById("statusPill");
+    const statusText = document.getElementById("statusText");
+    const hubUrlInput = document.getElementById("hubUrlInput");
+    const saveHubBtn = document.getElementById("saveHubBtn");
+    const registerFirstBtn = document.getElementById("registerFirstBtn");
+    const pairCodeInput = document.getElementById("pairCodeInput");
+    const pairCodeBtn = document.getElementById("pairCodeBtn");
+    const unregisteredSection = document.getElementById("unregisteredSection");
+    const registeredSection = document.getElementById("registeredSection");
+    const genPairBtn = document.getElementById("genPairBtn");
+    const pairingCodeBox = document.getElementById("pairingCodeBox");
+    const displayPairCode = document.getElementById("displayPairCode");
+    const deviceList = document.getElementById("deviceList");
+    const devCount = document.getElementById("devCount");
+    const actionStatusBadge = document.getElementById("actionStatusBadge");
+    const actionStatusText = document.getElementById("actionStatusText");
+
+    let currentDeviceId = "";
+
+    function updateUI(state) {
+      if (state.hubUrl && !hubUrlInput.value) {
+        hubUrlInput.value = state.hubUrl;
+      }
+      currentDeviceId = state.deviceId || "";
+
+      // Connection Status
+      const status = state.connectionStatus || "offline";
+      statusPill.className = "status-pill " + status;
+      statusText.innerText = status.toUpperCase();
+
+      // Auth sections
+      if (state.isRegistered) {
+        unregisteredSection.style.display = "none";
+        registeredSection.style.display = "block";
+      } else {
+        unregisteredSection.style.display = "flex";
+        registeredSection.style.display = "none";
+      }
+
+      // Pairing code
+      if (state.pairingCode) {
+        pairingCodeBox.style.display = "block";
+        displayPairCode.innerText = state.pairingCode;
+      }
+
+      // Action Status
+      if (state.commandStatus) {
+        actionStatusBadge.style.display = "inline-block";
+        actionStatusBadge.className = "status-badge " + state.commandStatus;
+        actionStatusText.innerText = state.commandStatus;
+      }
+
+      // Online Devices
+      renderDevices(state.onlineDevices || []);
+    }
+
+    function renderDevices(devices) {
+      devCount.innerText = devices.length;
+      if (devices.length === 0) {
+        deviceList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No devices online yet.</div>';
+        return;
+      }
+
+      deviceList.innerHTML = "";
+      devices.forEach(dev => {
+        const isSelf = dev.id === currentDeviceId;
+        const item = document.createElement("div");
+        item.className = "device-item";
+        item.innerHTML = `
+          <div>
+            <div class="device-name">${escapeHtml(dev.name)} ${isSelf ? '<span style="color: #818cf8;">(This PC)</span>' : ''}</div>
+            <div class="device-sub">Platform: ${escapeHtml(dev.platform)} &bull; ID: ${escapeHtml(dev.id.substring(0, 8))}...</div>
+          </div>
+          <div class="device-actions">
+            ${!isSelf ? `
+              <button class="btn-amber" onclick="sendLock('${dev.id}')">Send Lock</button>
+              <button class="btn-secondary" onclick="sendPing('${dev.id}')">Send Ping</button>
+            ` : ''}
+          </div>
+        `;
+        deviceList.appendChild(item);
+      });
+    }
+
+    function escapeHtml(str) {
+      return (str || "").replace(/[&<>"']/g, m => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[m]));
+    }
+
+    window.sendLock = (targetId) => {
+      window.beruApi.sendCommand(targetId, "lock");
+    };
+
+    window.sendPing = (targetId) => {
+      window.beruApi.sendCommand(targetId, "ping");
+    };
+
+    saveHubBtn.addEventListener("click", () => {
+      const url = hubUrlInput.value.trim();
+      if (url) window.beruApi.setHubUrl(url);
+    });
+
+    registerFirstBtn.addEventListener("click", () => {
+      window.beruApi.registerFirstDevice();
+    });
+
+    pairCodeBtn.addEventListener("click", () => {
+      const code = pairCodeInput.value.trim();
+      if (code) window.beruApi.pairWithCode(code);
+    });
+
+    genPairBtn.addEventListener("click", () => {
+      window.beruApi.generatePairingCode();
+    });
+
+    // Initialize
+    window.beruApi.getInitialState().then(updateUI);
+    window.beruApi.onStateChange(updateUI);
+  </script>
+</body>
+</html>
