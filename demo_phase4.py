@@ -47,12 +47,15 @@ def run_phase4_demo():
     pc_id = pc["device_id"]
     print(f"-> PC paired: ThinkPad X1 (ID: {pc_id})")
 
-    # Connect PC to regular WebSocket
-    with client.websocket_connect(f"/ws?token={pc_token}") as ws_pc:
+    # Connect PC to regular WebSocket using single-use tickets
+    tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc_token}"}).json()["ticket"]
+    tkt_phone = client.post("/auth/ticket", headers={"Authorization": f"Bearer {phone_token}"}).json()["ticket"]
+
+    with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
         _ = ws_pc.receive_json() # consume initial device_list
         print(f"-> PC connected to Hub WebSocket.")
 
-        with client.websocket_connect(f"/ws?token={phone_token}") as ws_phone:
+        with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
             _ = ws_phone.receive_json() # consume initial device_list
             _ = ws_pc.receive_json()    # PC receives updated device_list
             print(f"-> Phone connected to Hub WebSocket.")

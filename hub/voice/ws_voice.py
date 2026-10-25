@@ -48,17 +48,12 @@ async def voice_websocket_endpoint(
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device revoked")
                 return
         elif token:
-            if not settings.ALLOW_LEGACY_WS_TOKEN:
-                logger.warning("Rejected voice WebSocket connection: raw tokens in URL query are prohibited.")
-                await websocket.close(
-                    code=status.WS_1008_POLICY_VIOLATION,
-                    reason="Raw tokens in URL query are prohibited. Obtain a ticket via POST /auth/ticket."
-                )
-                return
-            device = get_device_by_token(db, token)
-            if not device or device.is_revoked:
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
-                return
+            logger.warning("Rejected voice WebSocket connection: raw tokens in URL query are prohibited.")
+            await websocket.close(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Raw tokens in URL query are prohibited. Obtain a ticket via POST /auth/ticket."
+            )
+            return
         else:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication ticket")
             return

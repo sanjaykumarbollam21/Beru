@@ -48,10 +48,14 @@ def run_phase5_demo():
     pc_id = pc["device_id"]
     print(f"-> PC paired: ThinkPad X1 (ID: {pc_id})")
 
-    with client.websocket_connect(f"/ws?token={phone_token}") as ws_phone:
+    # Connect devices using short-lived tickets
+    tkt_phone = client.post("/auth/ticket", headers={"Authorization": f"Bearer {phone_token}"}).json()["ticket"]
+    tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc_token}"}).json()["ticket"]
+
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc_token}") as ws_pc:
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()
             _ = ws_pc.receive_json()
             print("-> Both Phone and PC connected to Hub WebSocket.")

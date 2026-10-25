@@ -58,11 +58,14 @@ def run_phase2_demo():
     pc_token = pc_data["token"]
     print(" -> Both devices paired successfully!")
 
-    # 2. Open WebSocket connections for Phone and PC
-    with client.websocket_connect(f"/ws?token={phone_token}") as ws_phone:
+    # 2. Open WebSocket connections for Phone and PC using short-lived tickets
+    tkt_phone = client.post("/auth/ticket", headers={"Authorization": f"Bearer {phone_token}"}).json()["ticket"]
+    tkt_pc = client.post("/auth/ticket", headers={"Authorization": f"Bearer {pc_token}"}).json()["ticket"]
+
+    with client.websocket_connect(f"/ws?ticket={tkt_phone}") as ws_phone:
         _ = ws_phone.receive_json()
 
-        with client.websocket_connect(f"/ws?token={pc_token}") as ws_pc:
+        with client.websocket_connect(f"/ws?ticket={tkt_pc}") as ws_pc:
             _ = ws_phone.receive_json()  # PC online notice
             _ = ws_pc.receive_json()     # Initial devices list
 

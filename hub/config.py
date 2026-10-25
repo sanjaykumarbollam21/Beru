@@ -58,7 +58,6 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     # Phase 6: Hardening, Reliability, and Packaging
     WS_TICKET_EXPIRE_SECONDS: int = 30
-    ALLOW_LEGACY_WS_TOKEN: bool = False
     DEVICE_TOKEN_INACTIVITY_DAYS: int = 90
     PAIRING_MAX_FAILED_ATTEMPTS: int = 5
     PAIRING_LOCKOUT_MINUTES: int = 10
