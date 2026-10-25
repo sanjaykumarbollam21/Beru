@@ -51,15 +51,15 @@ class MobileTransferClient {
     }
 
     final startData = jsonDecode(startRes.body);
-    final transferId = startData["transfer_id"];
-    final chunkSize = startData["chunk_size"];
-    final uploadToken = startData["upload_token"];
-    final totalChunks = startData["total_chunks"];
+    final String transferId = startData["transfer_id"];
+    final int chunkSize = (startData["chunk_size"] as num).toInt();
+    final String uploadToken = startData["upload_token"];
+    final int totalChunks = (startData["total_chunks"] as num).toInt();
 
     // 2. Upload each chunk
     for (int i = 0; i < totalChunks; i++) {
-      final start = i * chunkSize;
-      final end = (start + chunkSize > fileSize) ? fileSize : start + chunkSize;
+      final int start = i * chunkSize;
+      final int end = (start + chunkSize > fileSize) ? fileSize : (start + chunkSize);
       final chunkBytes = bytes.sublist(start, end);
 
       final chunkUrl = Uri.parse("$hubBaseUrl/transfer/$transferId/chunk/$i");

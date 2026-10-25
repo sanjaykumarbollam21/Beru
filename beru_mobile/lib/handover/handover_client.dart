@@ -18,7 +18,7 @@ class MobileHandoverClient {
     final summary = data["summary"] ?? "Continue session on phone";
     final contextType = data["context_type"] ?? "conversation";
 
-    print("[Handover] Request received: $summary ($contextType)");
+    print("[Handover] Request $handoverId received: $summary ($contextType)");
     // In production: shows heads-up notification with 'Accept' and 'Decline' actions
   }
 

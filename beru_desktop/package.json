@@ -1,0 +1,29 @@
+{
+  "name": "beru-desktop",
+  "version": "1.0.0",
+  "description": "Beru Assistant - Cross-device Desktop Client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/test_modules.js",
+    "build": "electron-builder --dir"
+  },
+  "keywords": [
+    "assistant",
+    "voice",
+    "cross-device",
+    "beru"
+  ],
+  "author": "Beru",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "electron-log": "^5.1.2",
+    "electron-updater": "^6.2.1",
+    "uuid": "^9.0.1",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^29.1.5",
+    "electron-builder": "^24.13.3"
+  }
+}

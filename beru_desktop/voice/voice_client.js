@@ -20,8 +20,26 @@ class DesktopVoiceClient {
     });
   }
 
-  startSession(mode = "hotkey", tts = "client") {
-    const wsUrl = `${this.hubUrl}/voice?token=${this.token}`;
+  async startSession(mode = "hotkey", tts = "client") {
+    let ticket = null;
+    try {
+      const httpUrl = this.hubUrl.replace(/^ws/, "http");
+      const res = await fetch(`${httpUrl}/auth/ticket`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        ticket = data.ticket;
+      }
+    } catch (e) {
+      console.error("[VoiceClient] Failed to acquire ticket:", e.message);
+    }
+
+    const wsUrl = ticket ? `${this.hubUrl}/voice?ticket=${ticket}` : `${this.hubUrl}/voice`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.on("open", () => {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 typedef SendJsonCallback = void Function(Map<String, dynamic> data);
