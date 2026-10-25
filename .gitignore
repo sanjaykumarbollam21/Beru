@@ -1,10 +1,59 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
-*.db
-.env
+.coverage
+htmlcov/
 .venv/
 venv/
+ENV/
+
+# Databases & Backups
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
 data/
+backups/
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.jks
+*.keystore
+key.properties
+
+# Node & Electron
+node_modules/
+dist/
+build/
+.electron/
+
+# Flutter & Android
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.apk
+*.aab
+.gradle/
+**/android/.gradle/
+**/app/.gradle/
+local.properties
+
+# AI / Audio Model Artifacts
+*.onnx
+*.bin
+*.pt
+*.pth
+
+# OS Artifacts
+.DS_Store
+Thumbs.db
