@@ -14,6 +14,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 1. Hub Python Environment & Tests
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -34,10 +35,36 @@ jobs:
         run: |
           pip-audit --desc || echo "Audit completed with advisory warnings"
 
-      - name: Run Test Suite
+      - name: Run Hub Test Suite
         run: |
           pytest tests/ -v
 
+      # 2. Docker Compose Validation
       - name: Validate Docker Compose Config
         run: |
           docker compose -f deploy/docker-compose.yml config
+
+      # 3. Flutter Mobile Verification
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Flutter Analyze & Test
+        run: |
+          cd beru_mobile
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      # 4. Electron Desktop Verification
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Desktop Unit Tests
+        run: |
+          cd beru_desktop
+          npm install
+          npm test
