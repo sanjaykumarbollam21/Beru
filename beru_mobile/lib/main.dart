@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -43,8 +44,8 @@ class _BeruHomePageState extends State<BeruHomePage> {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  // Connection & Config
-  String _hubUrl = 'http://10.0.2.2:8000';
+  // Connection & Config (empty by default, loaded from secure storage)
+  String _hubUrl = '';
   String _deviceToken = '';
   String _deviceId = '';
   String _connectionStatus = 'offline'; // connected, reconnecting, offline
@@ -290,8 +291,9 @@ class _BeruHomePageState extends State<BeruHomePage> {
 
     if (_shouldReconnect) {
       _reconnectAttempts++;
-      final delaySeconds = (_reconnectAttempts < 5) ? (1 << _reconnectAttempts) : 16;
-      _reconnectTimer = Timer(Duration(seconds: delaySeconds), () {
+      final baseSeconds = (_reconnectAttempts < 5) ? (1 << _reconnectAttempts) : 16;
+      final jitterMs = Random().nextInt(1000);
+      _reconnectTimer = Timer(Duration(seconds: baseSeconds, milliseconds: jitterMs), () {
         if (_shouldReconnect) {
           _connectWebSocket();
         }
@@ -339,14 +341,20 @@ class _BeruHomePageState extends State<BeruHomePage> {
     final action = msg['action'] as String;
 
     if (action == 'ping') {
+      setState(() {
+        _commandStatus = 'received ping';
+      });
       _channel?.sink.add(jsonEncode({
         'type': 'result',
         'command_id': cmdId,
         'status': 'ok',
         'result': {'pong': true, 'device': 'android'},
       }));
-      _showSnack('Received ping from hub');
+      _showSnack('Received ping from hub/PC');
     } else if (action == 'notify') {
+      setState(() {
+        _commandStatus = 'received notify';
+      });
       final text = (msg['params'] as Map?)?['message'] ?? 'Notification from Beru';
       _showSnack(text.toString());
       _channel?.sink.add(jsonEncode({

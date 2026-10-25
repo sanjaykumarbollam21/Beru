@@ -1,7 +1,8 @@
 /**
  * Beru Desktop - Main Electron Process (Phase 1)
  * Enforces secure storage for device tokens via Electron safeStorage.
- * Renderer communicates through isolated preload bridge without access to raw tokens.
+ * Sandboxed renderer communicates through isolated preload bridge without access to raw tokens.
+ * Single WebSocket router multiplexes commands, clipboard, and handover messages.
  */
 
 const { app, BrowserWindow, ipcMain, safeStorage } = require("electron");
@@ -11,8 +12,10 @@ const { exec } = require("child_process");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 
-// Lifecycle & helper modules
+// Lifecycle & client modules
 const { DesktopLifecycleManager } = require("./updater");
+const DesktopClipboardWatcher = require("./clipboard/clipboard_watcher");
+const DesktopHandoverClient = require("./handover/handover_client");
 
 let mainWindow = null;
 let wsClient = null;
@@ -20,9 +23,9 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let commandTimeoutTimer = null;
 
-// App State
+// App State (no hardcoded URLs or dummy tokens)
 let appState = {
-  hubUrl: process.env.BERU_HUB_URL || "http://127.0.0.1:8000",
+  hubUrl: process.env.BERU_HUB_URL || "",
   deviceId: "",
   isRegistered: false,
   connectionStatus: "offline", // connected, reconnecting, offline
@@ -31,6 +34,18 @@ let appState = {
   commandStatus: "",
   pendingCommandId: null
 };
+
+// WebSocket wrapper for cross-device modules
+const wsWrapper = {
+  send: (data) => {
+    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+      wsClient.send(data);
+    }
+  }
+};
+
+let clipboardWatcher = null;
+let handoverClient = null;
 
 // Storage Paths
 function getAuthFilePath() {
@@ -50,6 +65,8 @@ function saveToken(token, deviceId) {
     fs.writeFileSync(authPath, data);
     appState.deviceId = deviceId;
     appState.isRegistered = true;
+    if (clipboardWatcher) clipboardWatcher.deviceId = deviceId;
+    if (handoverClient) handoverClient.deviceId = deviceId;
   } catch (e) {
     console.error("[Main] Error saving token:", e);
   }
@@ -69,6 +86,8 @@ function loadToken() {
     const parsed = JSON.parse(str);
     appState.deviceId = parsed.deviceId || "";
     appState.isRegistered = !!parsed.token;
+    if (clipboardWatcher) clipboardWatcher.deviceId = appState.deviceId;
+    if (handoverClient) handoverClient.deviceId = appState.deviceId;
     return parsed.token;
   } catch (e) {
     console.error("[Main] Error reading stored token:", e);
@@ -90,11 +109,11 @@ function pushStateToRenderer() {
   }
 }
 
-// --- WebSocket & Ticket Flow ---
+// --- WebSocket & Ticket Flow with Exponential Backoff & Jitter ---
 
 async function connectWebSocket() {
   const token = loadToken();
-  if (!token) return;
+  if (!token || !appState.hubUrl) return;
 
   if (reconnectTimer) clearTimeout(reconnectTimer);
   appState.connectionStatus = reconnectAttempts > 0 ? "reconnecting" : "offline";
@@ -116,7 +135,7 @@ async function connectWebSocket() {
 
     const { ticket } = await ticketRes.json();
 
-    // 2. Open WebSocket
+    // 2. Open WebSocket with single-use ticket and protocol_version=2.0
     const wsBaseUrl = appState.hubUrl
       .replace(/^http:/, "ws:")
       .replace(/^https:/, "wss:");
@@ -158,12 +177,18 @@ function handleWsDisconnect() {
   pushStateToRenderer();
 
   reconnectAttempts++;
-  const delaySec = Math.min(16, Math.pow(2, reconnectAttempts));
+  // Exponential backoff (1s, 2s, 4s... max 16s) with random jitter
+  const baseDelay = Math.min(16, Math.pow(2, reconnectAttempts));
+  const jitter = Math.random() * 0.5 * baseDelay; // 0% - 50% random jitter
+  const delaySec = baseDelay + jitter;
+
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     connectWebSocket();
   }, delaySec * 1000);
 }
+
+// --- Main Message Router ---
 
 function handleWsMessage(raw) {
   try {
@@ -181,9 +206,15 @@ function handleWsMessage(raw) {
       }
     } else if (type === "execute") {
       handleExecuteCommand(msg);
+    } else if (type === "clipboard_push" || type === "clipboard_update") {
+      if (clipboardWatcher) clipboardWatcher.handleIncomingClipboardPush(msg);
+    } else if (type === "handover_request") {
+      if (handoverClient) handoverClient.handleHandoverRequest(msg);
+    } else if (type === "handover_state") {
+      if (handoverClient) handoverClient.handleHandoverState(msg);
     }
   } catch (e) {
-    console.error("[WS] Message parsing error:", e);
+    console.error("[WS] Message routing error:", e);
   }
 }
 
@@ -191,8 +222,7 @@ function handleExecuteCommand(msg) {
   const { command_id, action } = msg;
 
   if (action === "lock") {
-    console.log("[Command] Executing Windows WorkStation Lock...");
-    // Lock Windows PC
+    console.log("[Command] Executing Windows WorkStation Lock via rundll32.exe...");
     exec("rundll32.exe user32.dll,LockWorkStation", (err) => {
       const status = err ? "error" : "ok";
       if (wsClient && wsClient.readyState === WebSocket.OPEN) {
@@ -215,7 +245,7 @@ function handleExecuteCommand(msg) {
       }));
     }
   } else {
-    // Unsupported action
+    // Unsupported action on PC
     if (wsClient && wsClient.readyState === WebSocket.OPEN) {
       wsClient.send(JSON.stringify({
         type: "result",
@@ -236,6 +266,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, "preload.js")
     }
   });
@@ -272,6 +303,9 @@ ipcMain.handle("beru:set-hub-url", (event, url) => {
 });
 
 ipcMain.handle("beru:register-first-device", async () => {
+  if (!appState.hubUrl) {
+    return { ok: false, error: "Please enter a Hub URL first." };
+  }
   try {
     const res = await fetch(`${appState.hubUrl}/register-first-device`, {
       method: "POST",
@@ -300,7 +334,7 @@ ipcMain.handle("beru:register-first-device", async () => {
 
 ipcMain.handle("beru:generate-pairing-code", async () => {
   const token = loadToken();
-  if (!token) return { ok: false, error: "Not registered" };
+  if (!token || !appState.hubUrl) return { ok: false, error: "Not registered or no Hub URL" };
 
   try {
     const res = await fetch(`${appState.hubUrl}/pair/start`, {
@@ -326,6 +360,7 @@ ipcMain.handle("beru:generate-pairing-code", async () => {
 });
 
 ipcMain.handle("beru:pair-with-code", async (event, code) => {
+  if (!appState.hubUrl) return { ok: false, error: "Please enter a Hub URL first." };
   try {
     const res = await fetch(`${appState.hubUrl}/pair/complete`, {
       method: "POST",
@@ -383,6 +418,9 @@ ipcMain.handle("beru:send-command", (event, { target, action }) => {
 });
 
 app.whenReady().then(() => {
+  clipboardWatcher = new DesktopClipboardWatcher(wsWrapper, appState.deviceId);
+  handoverClient = new DesktopHandoverClient(wsWrapper, appState.deviceId);
+
   loadToken();
   createWindow();
 
@@ -390,7 +428,7 @@ app.whenReady().then(() => {
   const lifecycle = new DesktopLifecycleManager(null);
   lifecycle.init();
 
-  if (appState.isRegistered) {
+  if (appState.isRegistered && appState.hubUrl) {
     connectWebSocket();
   }
 });
