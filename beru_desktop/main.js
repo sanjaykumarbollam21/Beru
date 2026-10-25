@@ -23,6 +23,7 @@ let wsClient = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let commandTimeoutTimer = null;
+let pairingExpiryTimer = null;
 
 // App State (no hardcoded URLs or dummy tokens)
 let appState = {
@@ -105,8 +106,7 @@ function clearToken() {
     }
     appState.deviceId = "";
     appState.isRegistered = false;
-    appState.pairingCode = null;
-    appState.pairingQrDataUrl = "";
+    clearPairingState();
     appState.onlineDevices = [];
     appState.connectionStatus = "offline";
     if (clipboardWatcher) clipboardWatcher.deviceId = "";
@@ -115,6 +115,15 @@ function clearToken() {
     pushStateToRenderer();
   } catch (e) {
     console.error("[Main] Error clearing stored token:", e);
+  }
+}
+
+function clearPairingState() {
+  appState.pairingCode = "";
+  appState.pairingQrDataUrl = "";
+  if (pairingExpiryTimer) {
+    clearTimeout(pairingExpiryTimer);
+    pairingExpiryTimer = null;
   }
 }
 
@@ -226,6 +235,10 @@ function handleWsMessage(raw) {
 
     if (type === "devices") {
       appState.onlineDevices = msg.online || [];
+      // Clear pairing code/QR once a new device joins
+      if (appState.pairingCode) {
+        clearPairingState();
+      }
       pushStateToRenderer();
     } else if (type === "command_status") {
       if (msg.command_id === appState.pendingCommandId) {
@@ -400,6 +413,13 @@ ipcMain.handle("beru:generate-pairing-code", async () => {
     } catch (qrErr) {
       console.error("[Main] Error generating QR code:", qrErr);
     }
+
+    // Auto-expire pairing code after 60 seconds
+    if (pairingExpiryTimer) clearTimeout(pairingExpiryTimer);
+    pairingExpiryTimer = setTimeout(() => {
+      clearPairingState();
+      pushStateToRenderer();
+    }, 60_000);
 
     pushStateToRenderer();
     return { ok: true, code, qr: appState.pairingQrDataUrl };
