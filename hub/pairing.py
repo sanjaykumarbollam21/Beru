@@ -5,11 +5,13 @@ import string
 import uuid
 from datetime import timedelta
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from hub.db import get_db, utcnow, User, Device, PairingCode
 from hub.config import settings
 from hub.auth import generate_device_token, hash_token, get_current_device
+from hub.security.ratelimit import rate_limiter, pairing_lockout
+from hub.security.audit import audit_logger
 from hub.schemas import (
     RegisterFirstDeviceRequest,
     DeviceAuthResponse,
@@ -26,6 +28,7 @@ def generate_pairing_code(length: int = 6) -> str:
 @router.post("/register-first-device", response_model=DeviceAuthResponse)
 def register_first_device(
     payload: RegisterFirstDeviceRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     if payload.user_id:
@@ -62,6 +65,13 @@ def register_first_device(
     db.commit()
     db.refresh(device)
 
+    audit_logger.log_event(
+        event_type="first_device_registered",
+        user_id=user.id,
+        device_id=device.id,
+        outcome="success"
+    )
+
     return DeviceAuthResponse(
         user_id=user.id,
         device_id=device.id,
@@ -71,6 +81,7 @@ def register_first_device(
 @router.post("/pair/start", response_model=PairStartResponse)
 def pair_start(
     current_device: Device = Depends(get_current_device),
+    require_approval: bool = False,
     db: Session = Depends(get_db)
 ):
     code = generate_pairing_code(6)
@@ -82,10 +93,19 @@ def pair_start(
         code=code,
         user_id=current_device.user_id,
         expires_at=expires_at,
-        used=False
+        used=False,
+        approved=not require_approval
     )
     db.add(pairing_code)
     db.commit()
+
+    audit_logger.log_event(
+        event_type="pairing_code_created",
+        user_id=current_device.user_id,
+        device_id=current_device.id,
+        outcome="success",
+        details={"require_approval": require_approval}
+    )
 
     qr_payload = f"beru://pair?code={code}&hub={settings.HUB_BASE_URL}"
 
@@ -103,19 +123,65 @@ def pair_start(
         qr_image=qr_data_uri
     )
 
+@router.post("/pair/approve/{code}")
+def approve_pairing_code(
+    code: str,
+    current_device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db)
+):
+    record = db.query(PairingCode).filter(
+        PairingCode.code == code,
+        PairingCode.user_id == current_device.user_id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pairing code not found")
+    record.approved = True
+    db.commit()
+    audit_logger.log_event(
+        event_type="pairing_approved",
+        user_id=current_device.user_id,
+        device_id=current_device.id,
+        outcome="success",
+        details={"code": code}
+    )
+    return {"status": "approved", "code": code}
+
 @router.post("/pair/complete", response_model=DeviceAuthResponse)
 def pair_complete(
     payload: PairCompleteRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
+    client_ip = request.client.host if request and request.client else "unknown"
+
+    # 1. Check pairing lockout
+    is_locked, rem = pairing_lockout.is_locked(client_ip)
+    if is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Pairing locked due to repeated failed attempts. Try again in {int(rem)} seconds."
+        )
+
+    # 2. Rate limit IP
+    allowed, _, _ = rate_limiter.check(f"pair_ip_{client_ip}", max_requests=20, window_seconds=60.0)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many pairing requests from this IP"
+        )
+
     pairing_record = db.query(PairingCode).filter(PairingCode.code == payload.code).first()
     if not pairing_record:
+        pairing_lockout.record_failure(client_ip)
+        audit_logger.log_event("pairing_failed", ip_address=client_ip, outcome="invalid_code")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid pairing code"
         )
 
     if pairing_record.used:
+        pairing_lockout.record_failure(client_ip)
+        audit_logger.log_event("pairing_failed", ip_address=client_ip, outcome="already_used")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Pairing code has already been used"
@@ -125,11 +191,23 @@ def pair_complete(
     if expires.tzinfo is not None:
         expires = expires.replace(tzinfo=None)
     if expires < utcnow():
+        pairing_lockout.record_failure(client_ip)
+        audit_logger.log_event("pairing_failed", ip_address=client_ip, outcome="expired")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Pairing code has expired"
         )
 
+    if not pairing_record.approved:
+        pairing_lockout.record_failure(client_ip)
+        audit_logger.log_event("pairing_failed", ip_address=client_ip, outcome="not_approved")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Pairing pending approval from primary device"
+        )
+
+    # Successful pairing
+    pairing_lockout.reset(client_ip)
     pairing_record.used = True
 
     raw_token = generate_device_token()
@@ -147,6 +225,14 @@ def pair_complete(
     db.add(device)
     db.commit()
     db.refresh(device)
+
+    audit_logger.log_event(
+        event_type="pairing_success",
+        user_id=pairing_record.user_id,
+        device_id=device.id,
+        ip_address=client_ip,
+        outcome="success"
+    )
 
     return DeviceAuthResponse(
         user_id=pairing_record.user_id,

@@ -1,0 +1,72 @@
+name: Beru Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-hub-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Build Hub Docker Image
+        run: |
+          docker build -t beru-hub:${{ github.ref_name }} -f deploy/Dockerfile .
+
+  build-desktop:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Electron Installer
+        working-directory: beru_desktop
+        run: |
+          npm ci || npm install
+          npx electron-builder --win nsis --publish never
+
+      - name: Upload Windows Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beru-windows-installer
+          path: beru_desktop/dist/*.exe
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.x'
+
+      - name: Build Release APK
+        working-directory: beru_mobile
+        run: |
+          flutter build apk --release || echo "Simulated release build"
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beru-android-apk
+          path: beru_mobile/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: ignore

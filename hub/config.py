@@ -56,7 +56,22 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3")
+    # Phase 6: Hardening, Reliability, and Packaging
+    WS_TICKET_EXPIRE_SECONDS: int = 30
+    DEVICE_TOKEN_INACTIVITY_DAYS: int = 90
+    PAIRING_MAX_FAILED_ATTEMPTS: int = 5
+    PAIRING_LOCKOUT_MINUTES: int = 10
+    BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./data/backups")
+    BACKUP_ENCRYPTION_KEY: str = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+    BACKUP_RETENTION_COUNT: int = 14
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 3
+    CIRCUIT_BREAKER_RECOVERY_SECONDS: float = 30.0
+    IDEMPOTENCY_TTL_SECONDS: int = 300  # 5 minutes
+    RATE_LIMIT_PER_MINUTE_IP: int = 120
+    RATE_LIMIT_PER_MINUTE_DEVICE: int = 240
+    MAX_WS_MESSAGE_SIZE_BYTES: int = 65536  # 64 KB
+    CURRENT_PROTOCOL_VERSION: str = "2.0"
+    SUPPORTED_PROTOCOL_VERSIONS: list[str] = ["1.0", "2.0"]
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -29,6 +29,7 @@ class Device(Base):
     token_hash = Column(String(64), nullable=False, index=True)
     capabilities = Column(JSON, default=list, nullable=False)  # list of strings
     last_seen = Column(DateTime(timezone=True), nullable=True)
+    is_revoked = Column(Boolean, default=False, nullable=False)
 
     user = relationship("User", back_populates="devices")
 
@@ -39,6 +40,7 @@ class PairingCode(Base):
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, default=False, nullable=False)
+    approved = Column(Boolean, default=True, nullable=False)
 
     user = relationship("User", back_populates="pairing_codes")
 

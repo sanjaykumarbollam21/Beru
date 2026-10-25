@@ -4,7 +4,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from hub.db import get_db, Device
+from hub.db import get_db, Device, utcnow
+from hub.config import settings
 
 security = HTTPBearer(auto_error=False)
 
@@ -18,7 +19,16 @@ def get_device_by_token(db: Session, token: str) -> Optional[Device]:
     if not token:
         return None
     token_h = hash_token(token)
-    return db.query(Device).filter(Device.token_hash == token_h).first()
+    device = db.query(Device).filter(Device.token_hash == token_h).first()
+    if not device:
+        return None
+    if getattr(device, "is_revoked", False):
+        return None
+    if device.last_seen:
+        last = device.last_seen.replace(tzinfo=None)
+        if (utcnow() - last).days > settings.DEVICE_TOKEN_INACTIVITY_DAYS:
+            return None
+    return device
 
 def get_current_device(
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),

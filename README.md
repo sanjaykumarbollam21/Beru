@@ -59,9 +59,27 @@ Beru is an agentic, cross-device assistant operating across Android mobile and W
   - Remembered facts: explicit fact storage (`remember`, `recall`, `forget`), with sensitive inferences prohibited and zero transcript retention.
   - Context injection: dynamically filters preferences and facts relevant to current request, enforcing a strict cap (~500 tokens / 1000 chars) before LLM prompt injection.
   - Full user privacy: complete per-user isolation, zero fact/preference values in logs, inspection, export (`POST /personalization/export`), and hard-confirmed reset (`DELETE /personalization`).
-- **Client Components**:
-  - `beru_mobile/`: `wake_claim_client.dart`, `personalization_screen.dart`.
-  - `beru_desktop/`: `wake_word.js`, `wake_claim_client.js`, `personalization_view.js`.
+### Phase 6: Hardening, Reliability, and Packaging
+- **Security Hardening**:
+  - **WebSocket Tickets**: Single-use tickets (`POST /auth/ticket`, 30s TTL) replacing long-lived tokens in URLs, eliminating credentials from proxy and server access logs.
+  - **Device Revocation & Token Rotation**: `GET /devices` listing, `DELETE /devices/{id}` revokes device immediately, invalidating tokens and cutting off live WebSocket connections. `POST /devices/{id}/rotate-token` rotates device tokens.
+  - **Pairing Lockout**: Rate-limiting and 5-failed-attempt lockout (10-minute cooldown) against brute-force code guessing. Optional primary-device approval gate (`POST /pair/approve/{code}`).
+  - **Audit Logging**: Structured security event logging (pairing, revocations, failed auth, rate limits, confirmations) without recording sensitive message content or transcripts.
+  - **Prompt Injection Defense & Capability Allowlist**: External data (clipboard, filenames, web) cannot autonomously trigger skills; devices execute only skills declared in their registration allowlist.
+- **Reliability & Resilience**:
+  - **Circuit Breaker**: State-machine breakers (`CLOSED`, `OPEN`, `HALF_OPEN`) wrapped around Groq, Gemini, STT, and TTS providers to prevent cascading hangs and fail over immediately.
+  - **Command Idempotency**: 5-minute deduplication window for command IDs, preventing duplicate side-effect execution during network reconnect retries.
+  - **Offline / Limited Mode**: Automatic degradation to local rule matching, local `faster-whisper`, and Piper TTS if cloud providers are unreachable.
+  - **Observability**: `GET /health` (liveness, DB status, online counts, breaker states) and `GET /metrics` (Prometheus-compatible plain text metrics).
+- **Backup & Disaster Recovery**:
+  - Nightly encrypted SQLite database backups using AES/Fernet encryption.
+  - Automatic retention policy maintaining the 14 most recent backups.
+  - Tested restore workflow with `PRAGMA integrity_check` verification.
+- **Packaging & Deployment**:
+  - `deploy/`: Production Docker Compose stack behind Caddy TLS reverse proxy.
+  - `beru_mobile/android/`: Persistent foreground service with sticky restart, boot receiver (`BootReceiver.kt`), and battery optimization onboarding.
+  - `beru_desktop/`: `electron-builder.yml` Windows installer, single-instance lock, sleep/resume power monitoring, and auto-updater (`updater.js`).
+  - `.github/workflows/`: CI test/lint/audit workflow and multi-platform release builder.
 
 ---
 
@@ -72,11 +90,23 @@ hub/
   main.py                 # App entry, router mounting, lifespan sweepers
   config.py               # Settings via environment variables
   db.py                   # SQLite models (User, Device, PairingCode, Preferences, Facts, Routines)
-  auth.py                 # SHA-256 token hashing & device authentication
-  pairing.py              # QR code & pairing endpoints
-  registry.py             # In-memory online device registry
-  router.py               # Cross-device command routing & plan execution
-  ws.py                   # WebSocket command gateway (/ws) & wake claim router
+  auth.py                 # Token hashing, inactivity checks & device authentication
+  pairing.py              # QR code, pairing lockout & approval endpoints
+  registry.py             # In-memory online device registry & disconnect triggers
+  router.py               # Cross-device command routing & capability allowlist
+  ws.py                   # WebSocket command gateway (/ws) with ticket auth & size limits
+  security/
+    tickets.py            # Short-lived single-use WebSocket tickets (30s TTL)
+    revocation.py         # Device revoke, disconnect & token rotation
+    ratelimit.py          # Sliding window rate limiter & pairing lockout
+    audit.py              # Append-only security audit logger
+    api.py                # Security endpoints (/auth/ticket, /devices)
+  reliability/
+    breaker.py            # Circuit breakers for cloud AI and speech providers
+    idempotency.py        # Command ID deduplication store (5 min TTL)
+    health.py             # Liveness/readiness /health & Prometheus /metrics
+  backup/
+    backup.py             # Encrypted SQLite database backup, retention, and restore
   wake/
     models.py             # WakeClaim, WakeDecision
     scoring.py            # Weighted scoring, hysteresis, preferred device override
@@ -112,21 +142,30 @@ hub/
   voice/
     vad.py                # Silero VAD endpointing & energy detector
     session.py            # Spoken dialogue state & confirmation classifier
-    ws_voice.py           # Bi-directional /voice WebSocket endpoint
-    stt/                  # Groq Whisper & local fallback STT
+    ws_voice.py           # Bi-directional /voice WebSocket endpoint with ticket auth
+    stt/                  # Groq Whisper & local fallback STT with circuit breakers
     tts/                  # Piper neural & client TTS orchestrator
+deploy/
+  docker-compose.yml      # Hub & Caddy production stack
+  Dockerfile              # Container image for hub
+  Caddyfile               # Automatic TLS reverse proxy & WebSocket termination
+  .env.example            # Documented environment variables template
 beru_mobile/              # Flutter client components
-  files/                  # Scoped-storage index & transfer client
-  clipboard/              # Share-sheet & Quick Settings tile triggers
-  handover/               # Handover notification & accept client
+  android/                # Gradle signing, BootReceiver.kt, BeruForegroundService.kt
   wake/                   # wake_claim_client.dart
   settings/               # personalization_screen.dart
 beru_desktop/             # Electron client components
-  files/                  # Approved folder index & transfer client
-  clipboard/              # Native clipboard watcher & push
-  handover/               # Handover client & auto-accept handler
+  electron-builder.yml    # NSIS Windows installer configuration
+  updater.js              # Auto-updater, tray management, and sleep-resume recovery
   wake/                   # wake_word.js, wake_claim_client.js
   settings/               # personalization_view.js
+docs/
+  SETUP.md                # Deployment, Docker Compose, Tailscale, pairing guide
+  TROUBLESHOOTING.md      # Android battery optimizations, background killer fixes
+  PROTOCOL.md             # Versioned v2.0 WebSocket message schemas & ticket flow
+.github/workflows/
+  ci.yml                  # Automated pytest, linting, and dependency audit
+  release.yml             # Automated installer and Docker packaging on release tag
 tests/
   test_pairing.py         # Pairing & code expiration tests
   test_routing.py         # WebSocket routing, timeout, and heartbeat tests
@@ -142,15 +181,20 @@ tests/
   test_arbiter.py         # Wake word arbitration, hysteresis, cooldown, promotion
   test_personalization.py # Preferences, learner, facts, context injection, privacy
   test_routines.py        # Routine CRUD, resolution, sequence suggestions
+  test_security.py        # WebSocket tickets, device revocation, token rotation, lockout
+  test_reliability.py     # Idempotency, circuit breaker, health, metrics, protocol versions
+  test_backup.py          # Encrypted SQLite backups, retention, and restore integrity
+  e2e/test_e2e_flow.py    # Full cross-device simulation with tickets and hardening
 demo_phase4.py            # End-to-end simulated demonstration of Phase 4
 demo_phase5.py            # End-to-end simulated demonstration of Phase 5
+demo_phase6.py            # End-to-end simulated demonstration of Phase 6
 ```
 
 ---
 
 ## Running the Test Suite
 
-Execute all 74 integration and unit tests across Phases 1-5:
+Execute all 93 integration and unit tests across Phases 1-6:
 ```bash
 pytest tests/ -v
 ```
@@ -165,4 +209,9 @@ python demo_phase4.py
 ### Phase 5 (Arbitration, Personalization, Routines)
 ```bash
 python demo_phase5.py
+```
+
+### Phase 6 (Security Hardening, Reliability, Backups)
+```bash
+python demo_phase6.py
 ```

@@ -1,0 +1,31 @@
+appId: com.beru.desktop
+productName: Beru
+copyright: Copyright © 2026 Beru Open Source
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - "**/*"
+  - "!dist/*"
+  - "!tests/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+
+publish:
+  provider: github
+  owner: beru-assistant
+  repo: beru

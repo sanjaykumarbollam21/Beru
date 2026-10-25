@@ -1,0 +1,25 @@
+{$DOMAIN:localhost} {
+    # Automatic TLS or self-signed in dev
+    tls internal
+
+    # Proxy all traffic to hub container
+    reverse_proxy hub:8000 {
+        # WebSocket upgrade headers handled automatically by Caddy
+        header_up X-Forwarded-Proto https
+        header_up X-Real-IP {remote_host}
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Structured access logging
+    log {
+        output stdout
+        format json
+    }
+}

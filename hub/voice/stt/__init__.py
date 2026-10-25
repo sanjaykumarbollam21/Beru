@@ -24,13 +24,27 @@ class STTOrchestrator:
         providers = custom_providers or self.get_providers()
         last_error = None
 
+        import time
+        from hub.reliability.breaker import circuit_registry
+        from hub.reliability.health import metrics_collector
+
         for p in providers:
+            breaker = circuit_registry.get_breaker(p.name)
+            if not breaker.can_execute():
+                logger.info(f"Skipping STT provider {p.name}: circuit breaker is OPEN")
+                continue
+
+            start_t = time.time()
             try:
                 logger.info(f"Attempting STT transcription with provider: {p.name}")
                 transcript = await p.transcribe(pcm_bytes, sample_rate=sample_rate)
                 if transcript is not None:
+                    breaker.record_success()
+                    metrics_collector.record_stt_latency(time.time() - start_t)
                     return transcript
             except Exception as e:
+                breaker.record_failure()
+                metrics_collector.record_provider_failure(p.name)
                 logger.warning(f"STT provider {p.name} failed: {e}. Trying fallback...")
                 last_error = e
 

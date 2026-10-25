@@ -18,24 +18,51 @@ from hub.schemas import WSCommandMessage, WSResultMessage
 
 logger = logging.getLogger(__name__)
 
+import json
+from hub.config import settings
+from hub.security.tickets import ticket_manager
+from hub.security.ratelimit import rate_limiter
+from hub.reliability.idempotency import idempotency_store
+from hub.reliability.health import metrics_collector
+
 router = APIRouter(tags=["websocket"])
 
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None)
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    protocol_version: Optional[str] = Query(None)
 ):
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
+    # Check protocol version
+    if protocol_version and protocol_version not in settings.SUPPORTED_PROTOCOL_VERSIONS:
+        await websocket.close(
+            code=status.WS_1002_PROTOCOL_ERROR,
+            reason="Protocol version not supported. Please update your Beru app."
+        )
         return
 
-    # Authenticate token against SQLite
+    # Check authentication (ticket preferred, fallback to token for backwards compatibility)
+    device = None
     with SessionLocal() as db:
-        device = get_device_by_token(db, token)
-        if not device:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        if ticket:
+            rec = ticket_manager.consume_ticket(ticket)
+            if not rec:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid or expired ticket")
+                return
+            device = db.query(Device).filter(Device.id == rec.device_id).first()
+            if not device or device.is_revoked:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device revoked")
+                return
+        elif token:
+            device = get_device_by_token(db, token)
+            if not device or device.is_revoked:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+                return
+        else:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication ticket")
             return
-        
+
         device_id = device.id
         user_id = device.user_id
         device_name = device.name
@@ -77,12 +104,29 @@ async def websocket_endpoint(
 
     try:
         while True:
-            data = await websocket.receive_json()
+            raw_text = await websocket.receive_text()
+            if len(raw_text) > settings.MAX_WS_MESSAGE_SIZE_BYTES:
+                logger.warning(f"Oversized message ({len(raw_text)} bytes) from {device_id}")
+                await websocket.send_json({"type": "error", "message": "Message exceeds maximum allowed size"})
+                continue
+
+            try:
+                data = json.loads(raw_text)
+            except Exception:
+                logger.warning(f"Malformed JSON from {device_id}")
+                await websocket.send_json({"type": "error", "message": "Malformed message"})
+                continue
+
             if not isinstance(data, dict):
                 continue
 
-            handover_manager.set_active_device(user_id, device_id)
+            # Rate limit check per device
+            allowed, _, _ = rate_limiter.check(f"ws_dev_{device_id}", max_requests=settings.RATE_LIMIT_PER_MINUTE_DEVICE, window_seconds=60.0)
+            if not allowed:
+                await websocket.send_json({"type": "error", "message": "Rate limit exceeded"})
+                continue
 
+            handover_manager.set_active_device(user_id, device_id)
 
             msg_type = data.get("type")
 
@@ -93,12 +137,21 @@ async def websocket_endpoint(
                 try:
                     cmd = WSCommandMessage(**data)
                     await registry.update_heartbeat(device_id)
+
+                    is_dup, prev_res = idempotency_store.check_or_set(cmd.id)
+                    if is_dup:
+                        logger.info(f"Duplicate command ID {cmd.id} ignored")
+                        if prev_res:
+                            await websocket.send_json(prev_res)
+                        continue
+
                     # Handle command in a background task so incoming results/heartbeats aren't blocked
                     asyncio_task = asyncio.create_task(
                         command_router.handle_command(online_device, cmd)
                     )
                 except Exception as e:
                     logger.warning(f"Malformed command from {device_id}: {e}")
+                    await websocket.send_json({"type": "error", "message": "Malformed command"})
 
             elif msg_type == "result":
                 try:

@@ -171,4 +171,16 @@ class DeviceRegistry:
                 pass
             await self.unregister(dev.device_id)
 
+    async def disconnect_device(self, device_id: str, code: int = 1008, reason: str = "Device disconnected"):
+        async with self._lock:
+            dev = self._devices.get(device_id)
+        if dev:
+            try:
+                if dev.websocket.client_state == WebSocketState.CONNECTED:
+                    await dev.websocket.close(code=code, reason=reason)
+            except Exception:
+                pass
+            await self.unregister(device_id)
+
 registry = DeviceRegistry()
+

@@ -67,18 +67,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from hub.security.api import router as security_router
+from hub.reliability.health import router as health_router
+
 app.include_router(pairing_router)
+app.include_router(security_router)
+app.include_router(health_router)
 app.include_router(ws_router)
 app.include_router(commands_router)
 app.include_router(voice_router)
 app.include_router(transfer_router)
 app.include_router(personalization_router)
 
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": settings.APP_NAME}
-
-@app.get("/health")
-def health():
-    return {"status": "healthy"}

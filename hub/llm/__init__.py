@@ -33,12 +33,26 @@ class LLMOrchestrator:
         providers = custom_providers or self.get_providers_for_task(task_type)
         last_error = None
 
+        import time
+        from hub.reliability.breaker import circuit_registry
+        from hub.reliability.health import metrics_collector
+
         for provider in providers:
+            breaker = circuit_registry.get_breaker(provider.name)
+            if not breaker.can_execute():
+                logger.info(f"Skipping {provider.name}: circuit breaker is OPEN")
+                continue
+
+            start_t = time.time()
             try:
                 logger.info(f"Attempting LLM completion with provider: {provider.name}")
                 result = await provider.complete(messages, schema=schema)
+                breaker.record_success()
+                metrics_collector.record_llm_latency(time.time() - start_t)
                 return result
             except Exception as e:
+                breaker.record_failure()
+                metrics_collector.record_provider_failure(provider.name)
                 logger.warning(f"Provider {provider.name} failed: {e}. Falling back to next...")
                 last_error = e
 

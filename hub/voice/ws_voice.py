@@ -18,22 +18,44 @@ from hub.router import command_router
 
 logger = logging.getLogger(__name__)
 
+from hub.security.tickets import ticket_manager
+
 router = APIRouter(tags=["voice"])
 
 @router.websocket("/voice")
 async def voice_websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None)
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    protocol_version: Optional[str] = Query(None)
 ):
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
+    if protocol_version and protocol_version not in settings.SUPPORTED_PROTOCOL_VERSIONS:
+        await websocket.close(
+            code=status.WS_1002_PROTOCOL_ERROR,
+            reason="Protocol version not supported. Please update your Beru app."
+        )
         return
 
+    device = None
     with SessionLocal() as db:
-        device = get_device_by_token(db, token)
-        if not device:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        if ticket:
+            rec = ticket_manager.consume_ticket(ticket)
+            if not rec:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid or expired ticket")
+                return
+            device = db.query(Device).filter(Device.id == rec.device_id).first()
+            if not device or device.is_revoked:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device revoked")
+                return
+        elif token:
+            device = get_device_by_token(db, token)
+            if not device or device.is_revoked:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+                return
+        else:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication ticket")
             return
+
         device_id = device.id
         user_id = device.user_id
         device_platform = device.platform
