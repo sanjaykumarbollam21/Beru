@@ -40,8 +40,8 @@ Beru is an agentic, cross-device assistant operating across Android mobile and W
   - Transfers dialog state, active web links, multi-step execution plans, or app intents.
   - Dynamic `active_device` tracking for contextual follow-up routing.
 - **Mobile & Desktop Client Modules**:
-  - `mobile/`: Scoped-storage search, transfer client, share-sheet/quick-tile clipboard trigger, handover client.
-  - `desktop/`: Folder index search, transfer client, clipboard watcher, handover client.
+  - `beru_mobile/`: Scoped-storage search, transfer client, share-sheet/quick-tile clipboard trigger, handover client.
+  - `beru_desktop/`: Folder index search, transfer client, clipboard watcher, handover client.
 
 ### Phase 5: Wake Word Arbitration and Personalization
 - **Wake Word Arbitration**:
