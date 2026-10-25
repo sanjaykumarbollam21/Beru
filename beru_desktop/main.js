@@ -11,6 +11,7 @@ const fs = require("fs");
 const { exec } = require("child_process");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
+const QRCode = require("qrcode");
 
 // Lifecycle & client modules
 const { DesktopLifecycleManager } = require("./updater");
@@ -30,6 +31,7 @@ let appState = {
   isRegistered: false,
   connectionStatus: "offline", // connected, reconnecting, offline
   pairingCode: "",
+  pairingQrDataUrl: "",
   onlineDevices: [],
   commandStatus: "",
   pendingCommandId: null
@@ -104,6 +106,7 @@ function clearToken() {
     appState.deviceId = "";
     appState.isRegistered = false;
     appState.pairingCode = null;
+    appState.pairingQrDataUrl = "";
     appState.onlineDevices = [];
     appState.connectionStatus = "offline";
     if (clipboardWatcher) clipboardWatcher.deviceId = "";
@@ -123,6 +126,7 @@ function pushStateToRenderer() {
       isRegistered: appState.isRegistered,
       connectionStatus: appState.connectionStatus,
       pairingCode: appState.pairingCode,
+      pairingQrDataUrl: appState.pairingQrDataUrl,
       onlineDevices: appState.onlineDevices,
       commandStatus: appState.commandStatus
     });
@@ -382,8 +386,23 @@ ipcMain.handle("beru:generate-pairing-code", async () => {
 
     const { code } = await res.json();
     appState.pairingCode = code;
+
+    try {
+      const qrPayload = JSON.stringify({
+        code: code,
+        hub_url: appState.hubUrl
+      });
+      appState.pairingQrDataUrl = await QRCode.toDataURL(qrPayload, {
+        width: 180,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff" }
+      });
+    } catch (qrErr) {
+      console.error("[Main] Error generating QR code:", qrErr);
+    }
+
     pushStateToRenderer();
-    return { ok: true, code };
+    return { ok: true, code, qr: appState.pairingQrDataUrl };
   } catch (e) {
     console.error("[IPC] Generate code error:", e.message);
     return { ok: false, error: e.message };

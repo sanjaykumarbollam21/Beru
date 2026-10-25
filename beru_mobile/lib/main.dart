@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -259,6 +260,60 @@ class _BeruHomePageState extends State<BeruHomePage> {
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _scanPairingQr() async {
+    final scanned = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
+    );
+
+    if (scanned == null || scanned.isEmpty) return;
+
+    try {
+      final data = jsonDecode(scanned);
+      if (data is Map && data['code'] != null) {
+        if (data['hub_url'] != null && data['hub_url'].toString().isNotEmpty) {
+          await _saveHubUrl(data['hub_url'].toString());
+        }
+        _pairCodeController.text = data['code'].toString().trim();
+        await _completePairingWithCode();
+        return;
+      }
+    } catch (_) {}
+
+    _pairCodeController.text = scanned.trim();
+    await _completePairingWithCode();
+  }
+
+  Future<void> _resetMobileRegistration() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset Registration'),
+        content: const Text('Reset local credentials on this phone to pair with desktop QR code?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    _disconnectWebSocket();
+    await _storage.delete(key: 'device_token');
+    await _storage.delete(key: 'device_id');
+    setState(() {
+      _deviceToken = '';
+      _deviceId = '';
+      _pairingCode = '';
+      _onlineDevices = [];
+      _commandStatus = '';
+    });
+    _showSnack('Registration reset. Ready to scan desktop QR code.');
   }
 
   Future<void> _revokeDevice(String deviceId, String name) async {
@@ -582,8 +637,22 @@ class _BeruHomePageState extends State<BeruHomePage> {
                             ],
                           ),
                           const Divider(height: 24),
-                          Text('Or Pair with Existing Code:',
-                              style: Theme.of(context).textTheme.bodySmall),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Or Pair with Existing Code / QR:',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.qr_code_scanner),
+                                label: const Text('Scan QR'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal.shade800,
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: _scanPairingQr,
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 8),
                           Row(
                             children: [
@@ -622,10 +691,24 @@ class _BeruHomePageState extends State<BeruHomePage> {
                             children: [
                               Text('Pair Another Device',
                                   style: Theme.of(context).textTheme.titleMedium),
-                              ElevatedButton.icon(
-                                icon: const Icon(Icons.qr_code),
-                                label: const Text('Get Code'),
-                                onPressed: _generatePairingCode,
+                              Row(
+                                children: [
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.qr_code),
+                                    label: const Text('Get Code'),
+                                    onPressed: _generatePairingCode,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Reset'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red.shade900,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: _resetMobileRegistration,
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -760,6 +843,85 @@ class _BeruHomePageState extends State<BeruHomePage> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class QrScannerScreen extends StatefulWidget {
+  const QrScannerScreen({super.key});
+
+  @override
+  State<QrScannerScreen> createState() => _QrScannerScreenState();
+}
+
+class _QrScannerScreenState extends State<QrScannerScreen> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _handled = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan Desktop QR Code'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () => _controller.toggleTorch(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.camera_front),
+            onPressed: () => _controller.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              if (_handled) return;
+              for (final barcode in capture.barcodes) {
+                final raw = barcode.rawValue;
+                if (raw != null && raw.trim().isNotEmpty) {
+                  _handled = true;
+                  Navigator.pop(context, raw.trim());
+                  break;
+                }
+              }
+            },
+          ),
+          Center(
+            child: Container(
+              width: 260,
+              height: 260,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.greenAccent, width: 3),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Text(
+                    'Point at Desktop QR Code',
+                    style: TextStyle(
+                      backgroundColor: Colors.black54,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

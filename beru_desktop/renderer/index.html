@@ -178,7 +178,10 @@
       <button id="genPairBtn" class="btn-secondary">Generate Pairing Code for Phone</button>
       <button id="resetAuthBtn" class="btn-secondary" style="margin-left: 8px; border-color: #ef4444; color: #fca5a5;">Reset / Re-register</button>
       <div id="pairingCodeBox" class="pairing-box" style="display: none;">
-        <div>Pairing Code for Phone (valid 60s):</div>
+        <div>Scan with Beru mobile app or enter code (valid 60s):</div>
+        <div style="margin: 12px 0;">
+          <img id="displayPairQr" src="" alt="Pairing QR Code" style="display: none; border-radius: 8px; border: 4px solid white; max-width: 180px;">
+        </div>
         <div id="displayPairCode" class="pairing-code">------</div>
       </div>
     </div>
@@ -208,6 +211,7 @@
     const genPairBtn = document.getElementById("genPairBtn");
     const pairingCodeBox = document.getElementById("pairingCodeBox");
     const displayPairCode = document.getElementById("displayPairCode");
+    const displayPairQr = document.getElementById("displayPairQr");
     const deviceList = document.getElementById("deviceList");
     const devCount = document.getElementById("devCount");
     const actionStatusBadge = document.getElementById("actionStatusBadge");
@@ -235,10 +239,18 @@
         registeredSection.style.display = "none";
       }
 
-      // Pairing code
+      // Pairing code & QR
       if (state.pairingCode) {
         pairingCodeBox.style.display = "block";
         displayPairCode.innerText = state.pairingCode;
+        if (state.pairingQrDataUrl) {
+          displayPairQr.src = state.pairingQrDataUrl;
+          displayPairQr.style.display = "inline-block";
+        } else {
+          displayPairQr.style.display = "none";
+        }
+      } else {
+        pairingCodeBox.style.display = "none";
       }
 
       // Action Status

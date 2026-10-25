@@ -16,6 +16,7 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   qr_flutter: ^4.1.0
   device_info_plus: ^10.1.2
+  mobile_scanner: ^7.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
