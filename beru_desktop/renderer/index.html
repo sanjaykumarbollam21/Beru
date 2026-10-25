@@ -176,6 +176,7 @@
     </div>
     <div id="registeredSection" style="display: none;">
       <button id="genPairBtn" class="btn-secondary">Generate Pairing Code for Phone</button>
+      <button id="resetAuthBtn" class="btn-secondary" style="margin-left: 8px; border-color: #ef4444; color: #fca5a5;">Reset / Re-register</button>
       <div id="pairingCodeBox" class="pairing-box" style="display: none;">
         <div>Pairing Code for Phone (valid 60s):</div>
         <div id="displayPairCode" class="pairing-code">------</div>
@@ -316,8 +317,16 @@
       if (code) window.beruApi.pairWithCode(code);
     });
 
+    const resetAuthBtn = document.getElementById("resetAuthBtn");
+
     genPairBtn.addEventListener("click", () => {
       window.beruApi.generatePairingCode();
+    });
+
+    resetAuthBtn.addEventListener("click", () => {
+      if (confirm("Reset local credentials and unpair this PC?")) {
+        window.beruApi.resetAuth();
+      }
     });
 
     // Initialize

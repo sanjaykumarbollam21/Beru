@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("beruApi", {
   generatePairingCode: () => ipcRenderer.invoke("beru:generate-pairing-code"),
   pairWithCode: (code) => ipcRenderer.invoke("beru:pair-with-code", code),
   revokeDevice: (deviceId) => ipcRenderer.invoke("beru:revoke-device", deviceId),
+  resetAuth: () => ipcRenderer.invoke("beru:reset-auth"),
   sendCommand: (target, action) => ipcRenderer.invoke("beru:send-command", { target, action }),
   onStateChange: (callback) => {
     const handler = (event, data) => callback(data);

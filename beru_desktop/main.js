@@ -95,6 +95,26 @@ function loadToken() {
   }
 }
 
+function clearToken() {
+  try {
+    const authPath = getAuthFilePath();
+    if (fs.existsSync(authPath)) {
+      fs.unlinkSync(authPath);
+    }
+    appState.deviceId = "";
+    appState.isRegistered = false;
+    appState.pairingCode = null;
+    appState.onlineDevices = [];
+    appState.connectionStatus = "offline";
+    if (clipboardWatcher) clipboardWatcher.deviceId = "";
+    if (handoverClient) handoverClient.deviceId = "";
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    pushStateToRenderer();
+  } catch (e) {
+    console.error("[Main] Error clearing stored token:", e);
+  }
+}
+
 function pushStateToRenderer() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("beru:state-changed", {
@@ -130,6 +150,11 @@ async function connectWebSocket() {
     });
 
     if (!ticketRes.ok) {
+      if (ticketRes.status === 401) {
+        console.warn("[Auth] Device token rejected (401 - Revoked or Invalid). Clearing local credentials.");
+        clearToken();
+        return;
+      }
       throw new Error(`Failed to acquire ticket: ${ticketRes.status}`);
     }
 
@@ -413,6 +438,14 @@ ipcMain.handle("beru:revoke-device", async (event, deviceId) => {
     console.error("[IPC] Revoke error:", e.message);
     return { ok: false, error: e.message };
   }
+});
+
+ipcMain.handle("beru:reset-auth", () => {
+  if (wsClient) {
+    try { wsClient.close(); } catch (_) {}
+  }
+  clearToken();
+  return { ok: true };
 });
 
 ipcMain.handle("beru:send-command", (event, { target, action }) => {
