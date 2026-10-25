@@ -302,6 +302,12 @@ ipcMain.handle("beru:set-hub-url", (event, url) => {
   return { ok: true };
 });
 
+const os = require("os");
+function getLocalDeviceName() {
+  const host = os.hostname();
+  return host ? `${host} (PC)` : "Windows PC";
+}
+
 ipcMain.handle("beru:register-first-device", async () => {
   if (!appState.hubUrl) {
     return { ok: false, error: "Please enter a Hub URL first." };
@@ -311,7 +317,7 @@ ipcMain.handle("beru:register-first-device", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        device_name: "ThinkPad PC",
+        device_name: getLocalDeviceName(),
         platform: "windows",
         capabilities: ["lock", "ping"]
       })
@@ -367,7 +373,7 @@ ipcMain.handle("beru:pair-with-code", async (event, code) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         code: code.trim(),
-        device_name: "ThinkPad PC",
+        device_name: getLocalDeviceName(),
         platform: "windows",
         capabilities: ["lock", "ping"]
       })
@@ -384,6 +390,27 @@ ipcMain.handle("beru:pair-with-code", async (event, code) => {
     return { ok: true };
   } catch (e) {
     console.error("[IPC] Pair error:", e.message);
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle("beru:revoke-device", async (event, deviceId) => {
+  const token = loadToken();
+  if (!token || !appState.hubUrl) return { ok: false, error: "Not registered or no Hub URL" };
+  try {
+    const res = await fetch(`${appState.hubUrl}/devices/${deviceId}`, {
+      method: "DELETE",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(`Revocation failed: ${await res.text()}`);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("[IPC] Revoke error:", e.message);
     return { ok: false, error: e.message };
   }
 });

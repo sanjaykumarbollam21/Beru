@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld("beruApi", {
   setHubUrl: (url) => ipcRenderer.invoke("beru:set-hub-url", url),
   registerFirstDevice: () => ipcRenderer.invoke("beru:register-first-device"),
   generatePairingCode: () => ipcRenderer.invoke("beru:generate-pairing-code"),
-  pairWithCode: (code) => ipcRenderer.invoke("beru:pair-with-code"),
+  pairWithCode: (code) => ipcRenderer.invoke("beru:pair-with-code", code),
+  revokeDevice: (deviceId) => ipcRenderer.invoke("beru:revoke-device", deviceId),
   sendCommand: (target, action) => ipcRenderer.invoke("beru:send-command", { target, action }),
   onStateChange: (callback) => {
     const handler = (event, data) => callback(data);

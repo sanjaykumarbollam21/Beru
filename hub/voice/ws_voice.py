@@ -74,7 +74,6 @@ async def voice_websocket_endpoint(
         expect_reply: bool = False,
         action: str = "none"
     ):
-        nonlocal tts_mode
         # Send reply JSON
         await websocket.send_json({
             "type": "reply",
@@ -101,7 +100,6 @@ async def voice_websocket_endpoint(
             await websocket.send_json({"type": "done"})
 
     async def handle_complete_utterance():
-        nonlocal tts_mode
         await websocket.send_json({"type": "thinking"})
         audio_bytes = session.get_audio_bytes()
 

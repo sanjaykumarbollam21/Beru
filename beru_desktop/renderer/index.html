@@ -98,6 +98,8 @@
     button:hover { background: var(--primary-hover); }
     button.btn-amber { background: #b45309; }
     button.btn-amber:hover { background: #92400e; }
+    button.btn-red { background: #dc2626; }
+    button.btn-red:hover { background: #b91c1c; }
     button.btn-secondary { background: #374151; }
     button.btn-secondary:hover { background: #4b5563; }
     
@@ -270,6 +272,7 @@
             ${!isSelf ? `
               <button class="btn-amber" onclick="sendLock('${dev.id}')">Send Lock</button>
               <button class="btn-secondary" onclick="sendPing('${dev.id}')">Send Ping</button>
+              <button class="btn-red" onclick="revokeDevice('${dev.id}', '${escapeHtml(dev.name)}')">Revoke</button>
             ` : ''}
           </div>
         `;
@@ -289,6 +292,14 @@
 
     window.sendPing = (targetId) => {
       window.beruApi.sendCommand(targetId, "ping");
+    };
+
+    window.revokeDevice = async (targetId, name) => {
+      if (!confirm(`Are you sure you want to revoke "${name}" (${targetId.substring(0, 8)}...)?`)) return;
+      const res = await window.beruApi.revokeDevice(targetId);
+      if (!res.ok) {
+        alert("Failed to revoke device: " + (res.error || "Unknown error"));
+      }
     };
 
     saveHubBtn.addEventListener("click", () => {

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -121,14 +123,30 @@ class _BeruHomePageState extends State<BeruHomePage> {
 
   // --- Auth: Register & Pairing ---
 
+  Future<String> _getDeviceName() async {
+    try {
+      if (Platform.isAndroid) {
+        final info = await DeviceInfoPlugin().androidInfo;
+        final mfg = info.manufacturer;
+        final model = info.model;
+        if (model.toLowerCase().startsWith(mfg.toLowerCase())) {
+          return model;
+        }
+        return '$mfg $model';
+      }
+    } catch (_) {}
+    return 'Android Phone';
+  }
+
   Future<void> _registerAsFirstDevice() async {
     setState(() => _isLoading = true);
     try {
+      final devName = await _getDeviceName();
       final res = await http.post(
         Uri.parse('$_hubUrl/register-first-device'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'device_name': 'Pixel Phone',
+          'device_name': devName,
           'platform': 'android',
           'capabilities': ['ping', 'notify'],
         }),
@@ -192,12 +210,13 @@ class _BeruHomePageState extends State<BeruHomePage> {
     if (code.isEmpty) return;
     setState(() => _isLoading = true);
     try {
+      final devName = await _getDeviceName();
       final res = await http.post(
         Uri.parse('$_hubUrl/pair/complete'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'code': code,
-          'device_name': 'Pixel Phone',
+          'device_name': devName,
           'platform': 'android',
           'capabilities': ['ping', 'notify'],
         }),
@@ -225,6 +244,49 @@ class _BeruHomePageState extends State<BeruHomePage> {
       }
     } catch (e) {
       _showSnack('Error completing pairing: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _revokeDevice(String deviceId, String name) async {
+    if (_deviceToken.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Revoke Device'),
+        content: Text('Are you sure you want to revoke "$name"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Revoke', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final res = await http.delete(
+        Uri.parse('$_hubUrl/devices/$deviceId'),
+        headers: {
+          'Authorization': 'Bearer $_deviceToken',
+        },
+      );
+
+      if (res.statusCode == 200 || res.statusCode == 204) {
+        _showSnack('Device revoked successfully');
+      } else {
+        _showSnack('Revoke failed: ${res.body}');
+      }
+    } catch (e) {
+      _showSnack('Error revoking device: $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -664,6 +726,17 @@ class _BeruHomePageState extends State<BeruHomePage> {
                                   label: const Text('Ping'),
                                   onPressed: () => _sendCommandToDevice(
                                       other['id'] as String, 'ping'),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red.shade900,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: () => _revokeDevice(
+                                      other['id'] as String,
+                                      other['name']?.toString() ?? 'Device'),
+                                  child: const Text('Revoke'),
                                 ),
                               ],
                             ),

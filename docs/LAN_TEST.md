@@ -34,7 +34,7 @@ The script will display your PC's active LAN IP (e.g. `http://192.168.1.50:8000`
 3. Under **Device Registration & Pairing**, click **Register as First Device**.
 4. Confirm:
    - The status badge changes to **CONNECTED** (green).
-   - The PC appears in the online devices list: `ThinkPad PC (This PC)`.
+   - The PC appears in the online devices list showing its real Windows hostname: `<PC-Hostname> (PC) (This PC)`.
 5. Click **Generate Pairing Code for Phone**. A 6-character code (e.g. `BERU42`) appears in the box.
 
 ---
@@ -48,31 +48,32 @@ The script will display your PC's active LAN IP (e.g. `http://192.168.1.50:8000`
 5. Confirm:
    - Phone shows notification: *"Paired successfully with hub"*.
    - Status chip in top AppBar changes to **CONNECTED** (green).
+   - Phone registers with its actual device model (e.g. `Pixel 7`, `Samsung Galaxy S23`, etc.).
 
 ---
 
 ### 4. Verify Both Devices Show Each Other Online
 - **On the Phone:** The **Live Online Devices (2)** card lists:
-  - `Pixel Phone (This Phone)` (Android)
-  - `ThinkPad PC` (Windows)
+  - `<Phone-Model> (This Phone)` (Android)
+  - `<PC-Hostname> (PC)` (Windows)
 - **On the PC:** The **Online Devices (2)** list updates to show:
-  - `ThinkPad PC (This PC)` (Windows)
-  - `Pixel Phone` (Android)
+  - `<PC-Hostname> (PC) (This PC)` (Windows)
+  - `<Phone-Model>` (Android)
 
 ---
 
 ### 5. Send Lock from Phone to PC
-1. On the phone, find `ThinkPad PC` in the devices card.
-2. Tap the amber button: **Send Lock to ThinkPad PC**.
-3. **Observe PC:** Windows immediately locks the workstation (`LockWorkStation`).
+1. On the phone, find the PC in the devices card.
+2. Tap the amber button: **Send Lock to <PC-Hostname>**.
+3. **Observe PC:** Windows immediately locks the workstation (`rundll32.exe user32.dll,LockWorkStation`).
 4. **Observe Phone:** The status badge changes from `sending...` to **`ok`** within 1–2 seconds.
 
 ---
 
 ### 6. Reverse Direction Test: Ping & Capabilities
-1. On the PC, click **Send Ping** next to `Pixel Phone`.
-2. Confirm the PC status updates to **`ok`**, and the phone displays a toast: *"Received ping from hub"*.
-3. *(Optional capability test)* If you send `lock` from PC to phone, confirm the status returns **`unsupported`** because standard Android apps do not lock the screen without Device Admin rights.
+1. On the PC, click **Send Ping** next to the phone.
+2. Confirm the PC status updates to **`ok`**, and the phone displays a toast: *"Received ping from hub/PC"*.
+3. *(Optional capability test)* If you send `lock` from PC to phone, confirm the status returns **`unsupported`** because standard Android apps cannot lock the screen without Device Admin rights.
 
 ---
 
@@ -84,12 +85,13 @@ The script will display your PC's active LAN IP (e.g. `http://192.168.1.50:8000`
 
 ---
 
-### 8. Device Revocation
-To test security revocation:
-1. Revoke the phone via HTTP on the hub:
-   ```bash
-   curl -X POST http://localhost:8000/devices/<PHONE_DEVICE_ID>/revoke -H "Authorization: Bearer <PC_TOKEN>"
-   ```
-2. Confirm:
-   - The phone's WebSocket is immediately closed with code `1008`.
-   - Any further connection attempt by the phone using its token is rejected.
+### 8. Device Revocation via UI
+Device tokens are encrypted on each device (Windows DPAPI / Android Keystore) and never exposed in the UI or clipboard. Revocation is performed via authenticated UI buttons:
+1. On the **Desktop app**, locate the phone in the **Online Devices** list.
+2. Click the red **Revoke** button next to the phone.
+3. Click **OK** on the confirmation prompt (`Revoke this device?`).
+4. The Desktop issues `DELETE /devices/{phone_device_id}` using its authenticated device token.
+5. **Observe:**
+   - The phone's WebSocket is immediately disconnected with code `1008`.
+   - The phone is removed from the active device registry.
+   - Any further connection attempt by the phone using its revoked token is rejected.
