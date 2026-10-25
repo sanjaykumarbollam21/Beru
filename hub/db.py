@@ -98,8 +98,25 @@ connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith(
 engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+def run_migrations(db_url: str = None):
+    import os
+    from alembic.config import Config
+    from alembic import command
+    
+    ini_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    if os.path.exists(ini_path):
+        cfg = Config(ini_path)
+        if db_url:
+            cfg.set_main_option("sqlalchemy.url", db_url)
+        command.upgrade(cfg, "head")
+    else:
+        Base.metadata.create_all(bind=engine)
+
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    try:
+        run_migrations()
+    except Exception:
+        Base.metadata.create_all(bind=engine)
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()

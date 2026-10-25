@@ -54,6 +54,8 @@ local.properties
 *.pt
 *.pth
 
-# OS Artifacts
+# OS & Editor Artifacts
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
